@@ -1,0 +1,17 @@
+<?php
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
+use App\Http\Controllers\HomeController;
+
+Route::get('/', fn()=>redirect()->route('dashboard'));
+Auth::routes();
+
+Route::middleware(['auth'])->group(function(){
+  Route::get('/dashboard',[HomeController::class,'index'])->name('dashboard');
+});
+
+require __DIR__.'/mars_modules.php';
+require __DIR__.'/traffic.php';
+require __DIR__.'/payments.php';
+// Fallback: Paksa redirect ke Mikrotik id=1 jika param id tidak valid
+Route::middleware(['auth'])->group(function () {

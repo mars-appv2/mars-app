@@ -1,0 +1,190 @@
+@extends('layouts.app')
+@section('content')
+<?= $DARK_CSS ?? '' ?>
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex gap-2 items-center">
+    <a href="{{ route('mikrotik.index') }}" class="btn">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="btn">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="btn btn-primary">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic',$mikrotik) }}" class="btn">IP Static</a>
+    <span class="badge">hotfix-v5</span>
+  </div>
+
+  @php
+    $profilesList = collect($profiles ?? [])->map(function($x){
+      return is_array($x) ? ($x['name'] ?? '') : $x;
+    })->filter()->values()->all();
+
+    $activeNames = collect($active ?? [])->map(function($a){
+      return is_array($a) ? ($a['name'] ?? '') : $a;
+    })->filter()->values()->flip()->all();
+  @endphp
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <div class="card">
+      <div class="card-header">Tambah Client</div>
+      <div class="card-body space-y-3">
+        <form method="POST" action="{{ route('mikrotik.pppoe.add',$mikrotik) }}">
+          @csrf
+          <div><label class="small">Username</label><input name="name" class="form-input" required></div>
+          <div><label class="small">Password</label><input name="password" class="form-input" required></div>
+          <div>
+            <label class="small">Profil</label>
+            <select name="profile" class="form-select">
+              <option value="default">default</option>
+              @foreach($profilesList as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
+            </select>
+          </div>
+          <label class="small inline-flex items-center gap-2"><input type="checkbox" name="record" value="1"> Rekam trafik client ini</label>
+          <div><button class="btn btn-primary">SIMPAN</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Tambah Profil</div>
+      <div class="card-body space-y-3">
+        <form method="POST" action="{{ route('mikrotik.pppoe.profile.add',$mikrotik) }}">
+          @csrf
+          <div><label class="small">Nama Profil</label><input name="name" class="form-input" placeholder="mis: 10M" required></div>
+          <div><label class="small">Rate-limit (up/down)</label><input name="rate" class="form-input" placeholder="10M/10M" required></div>
+          <div><label class="small">Parent Queue (opsional)</label><input name="parent" class="form-input" placeholder="mis: global"></div>
+          <div><button class="btn btn-primary">SIMPAN</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Kelola Client</div>
+    <div class="card-body">
+      <div class="mb-3 flex items-center gap-2">
+        <input id="pppSearch" class="form-input max-w-md" placeholder="Cari username / profil..." />
+        <span class="small">Total: {{ is_array($secrets ?? null) ? count($secrets) : 0 }}</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="table" id="pppTable">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Profil</th>
+              <th>Service</th>
+              <th>Status</th>
+              <th class="text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+          @foreach(($secrets ?? []) as $r)
+            @php
+              $name = is_array($r)?($r['name'] ?? ''):strval($r);
+              $profile = is_array($r)?($r['profile'] ?? 'default'):'default';
+              $service = is_array($r)?($r['service'] ?? 'pppoe'):'pppoe';
+              $disabled = is_array($r)?($r['disabled'] ?? 'false'):'false';
+              $isActive = array_key_exists($name,$activeNames);
+            @endphp
+            <tr data-user="{{ $name }}" data-prof="{{ $profile }}">
+              <td class="font-medium">{{ $name }}</td>
+              <td>{{ $profile }}</td>
+              <td>{{ $service }}</td>
+              <td>
+                @if($disabled === 'true')
+                  <span class="kpill dim">disabled</span>
+                @else
+                  @if($isActive)
+                    <span class="kpill ok">active</span>
+                  @else
+                    <span class="kpill">enabled</span>
+                  @endif
+                @endif
+              </td>
+              <td class="text-right">
+                <!-- Enable/Disable -->
+                @if($disabled === 'true')
+                <form method="POST" action="{{ route('mikrotik.pppoe.edit',$mikrotik) }}" class="inline">
+                  @csrf
+                  <input type="hidden" name="name" value="{{ $name }}">
+                  <input type="hidden" name="disabled" value="">
+                  <button class="btn">Enable</button>
+                </form>
+                @else
+                <form method="POST" action="{{ route('mikrotik.pppoe.edit',$mikrotik) }}" class="inline">
+                  @csrf
+                  <input type="hidden" name="name" value="{{ $name }}">
+                  <input type="hidden" name="disabled" value="1">
+                  <button class="btn">Disable</button>
+                </form>
+                @endif
+
+                <!-- Rekam / Stop Rekam -->
+                <form method="POST" action="{{ route('mikrotik.pppoe.record',$mikrotik) }}" class="inline">
+                  @csrf
+                  <input type="hidden" name="name" value="{{ $name }}">
+                  <input type="hidden" name="enable" value="1">
+                  <button class="btn">Rekam</button>
+                </form>
+                <form method="POST" action="{{ route('mikrotik.pppoe.record',$mikrotik) }}" class="inline">
+                  @csrf
+                  <input type="hidden" name="name" value="{{ $name }}">
+                  <button class="btn">Stop</button>
+                </form>
+
+                <!-- Edit (inline) -->
+                <button class="btn" onclick="toggleEdit('{{ $name }}')">Edit</button>
+
+                <!-- Delete -->
+                <form method="POST" action="{{ route('mikrotik.pppoe.delete',$mikrotik) }}" class="inline" onsubmit="return confirm('Hapus {{ $name }} ?')">
+                  @csrf
+                  <input type="hidden" name="name" value="{{ $name }}">
+                  <button class="btn" style="color:#fca5a5">Delete</button>
+                </form>
+              </td>
+            </tr>
+            <tr id="edit-{{ $name }}" style="display:none; background:rgba(148,163,184,.06)">
+              <td colspan="5">
+                <form method="POST" action="{{ route('mikrotik.pppoe.edit',$mikrotik) }}" class="grid md:grid-cols-4 gap-2 items-end">
+                  @csrf
+                  <input type="hidden" name="name" value="{{ $name }}">
+                  <div><label class="small">Password baru (opsional)</label><input name="password" class="form-input" placeholder="(biarkan kosong jika tidak ganti)"></div>
+                  <div>
+                    <label class="small">Profil</label>
+                    <select name="profile" class="form-select">
+                      <option value="">(tetap)</option>
+                      @foreach($profilesList as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
+                    </select>
+                  </div>
+                  <div><button class="btn btn-primary">SIMPAN PERUBAHAN</button></div>
+                </form>
+              </td>
+            </tr>
+          @endforeach
+          </tbody>
+        </table>
+      </div>
+      <div class="small mt-2">Tips: gunakan kolom pencarian di atas untuk memfilter user.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleEdit(n){
+  const r=document.getElementById('edit-'+n);
+  if(r) r.style.display = (r.style.display==='none'||!r.style.display)?'table-row':'none';
+}
+(function(){
+  const q=document.getElementById('pppSearch');
+  const rows=[...document.querySelectorAll('#pppTable tbody tr')].filter((_,i)=>i%2===0); // hanya baris utama (bukan form edit)
+  const norm=s=>String(s||'').toLowerCase();
+  if(!q) return;
+  q.addEventListener('input', ()=>{
+    const v=norm(q.value);
+    rows.forEach(tr=>{
+      const u=norm(tr.getAttribute('data-user'));
+      const p=norm(tr.getAttribute('data-prof'));
+      tr.style.display = (u.includes(v)||p.includes(v)) ? '' : 'none';
+      const edit=document.getElementById('edit-'+tr.getAttribute('data-user'));
+      if(edit) edit.style.display='none';
+    });
+  });
+})();
+</script>
+@endsection

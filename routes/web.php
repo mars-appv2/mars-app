@@ -1,0 +1,436 @@
+<?php
+
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
+
+/* === Controllers === */
+use App\Http\Controllers\HomeController;
+use App\Http\Controllers\UsersController;
+use App\Http\Controllers\TrafficTargetsController;
+use App\Http\Controllers\TrafficController;
+use App\Http\Controllers\AuditLogController;
+use App\Http\Controllers\MikrotikController;
+use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\RadiusApiController;
+use App\Http\Controllers\WaUiController;
+use App\Http\Controllers\WaGatewayController;
+use App\Http\Controllers\WaController;
+use App\Http\Controllers\WaBotController;
+use App\Http\Controllers\WaStaffController;
+use App\Http\Controllers\TicketUiController;
+
+/* TELEGRAM controllers */
+use App\Http\Controllers\TelegramController;
+use App\Http\Controllers\TelegramWebhookController;
+
+// ====== CLIENT PORTAL (USER END) ======
+use App\Http\Controllers\Client\LoginController as ClientLogin;
+use App\Http\Controllers\Client\DashboardController as ClientDashboardController;
+use App\Http\Controllers\Client\TrafficController as ClientTrafficController;
+use App\Http\Controllers\Client\BillingController as ClientBillingController;
+use App\Http\Controllers\Client\WifiController as ClientWifiController;
+
+/* UI baru */
+use App\Http\Controllers\RadiusUiController;
+/* BillingUiController di-load di routes/billing.php */
+
+/* Fitur lama (RAW) — dipertahankan, diprefix baru) */
+use App\Http\Controllers\RadiusUserController;
+use App\Http\Controllers\RadiusSessionController;
+use App\Http\Controllers\BillingController;
+
+// ==================  Staf Portal (controllers) ========================
+use App\Http\Controllers\Staff\LoginController as StaffLoginController;
+use App\Http\Controllers\Staff\DashboardController as StaffDashboardController;
+use App\Http\Controllers\Staff\NocController as StaffNocController;
+use App\Http\Controllers\Staff\TicketsController as StaffTicketsController;
+use App\Http\Controllers\Staff\BillingController as StaffBillingController;
+use App\Http\Controllers\Staff\UsersController as StaffUsersController;
+use App\Http\Controllers\Staff\OtpController   as StaffOtpController;
+use App\Http\Controllers\Staff\CustomersController as StaffCustomersController;
+use App\Http\Controllers\Staff\DevicesController   as StaffDevicesController;
+/* PENTING: alias agar tidak bentrok */
+use App\Http\Controllers\Staff\CustBillingController as StaffCustBillingController;
+
+
+/* ======================================================================
+| Root & Auth
+|======================================================================*/
+Route::get('/', fn () => redirect()->route('dashboard'));
+Auth::routes();
+
+/* Webhook bot WA (publik, tanpa auth) */
+Route::post('/wa/webhook', [WaBotController::class, 'webhook'])->name('wa.webhook');
+
+/* Webhook Telegram (publik, tanpa auth) */
+/* gunakan secret di .env TELEGRAM_WEBHOOK_SECRET */
+Route::post('/telegram/{secret}', [TelegramWebhookController::class, 'handle'])
+    ->name('telegram.webhook')
+    ->where('secret', '[A-Za-z0-9\-\_]+');
+
+/* File route tambahan (punya kamu) */
+require __DIR__.'/mars_modules.php';
+require __DIR__.'/traffic.php';
+require __DIR__.'/payments.php';
+require __DIR__.'/monitor_groups.php';
+require __DIR__.'/backups.php';
+
+/* Pisahkan Billing ke file sendiri */
+require __DIR__.'/billing.php';
+require __DIR__.'/settings.php';
+
+// === Traffic Graphs Loader (safe, non-breaking) ===
+
+
+/* ======================================================================
+| Endpoint publik WA Gateway (TANPA auth)  -> gunakan prefix /wa-gw/*
+|======================================================================*/
+Route::post('/wa-gw/send', [\App\Http\Controllers\WaPublicController::class, 'send'])->name('wa.public.send');
+Route::post('/wa-gw/broadcast', [\App\Http\Controllers\WaPublicController::class, 'broadcast'])->name('wa.public.broadcast');
+Route::get('/wa-gw/status', [\App\Http\Controllers\WaPublicController::class, 'status'])->name('wa.public.status');
+
+/* ======================================================================
+| Area login
+|======================================================================*/
+Route::middleware(['auth'])->group(function () {
+
+    /* ---------------- Dashboard ---------------- */
+    Route::get('/dashboard', [HomeController::class, 'index'])->name('dashboard');
+
+    /* ---------------- Audit Log (admin only) ---------------- */
+    Route::get('/logs', [AuditLogController::class, 'index'])
+        ->middleware('role:admin')
+        ->name('logs.index');
+
+    /* ---------------- API kecil untuk dashboard ---------------- */
+    Route::get(
+        '/api/mikrotik/{mikrotik}/interfaces',
+        [MikrotikController::class,'interfacesJson']
+    )->name('mikrotik.ifaces.json');
+
+    /* ---------------- WA UI (untuk operator via browser) ---------------- */
+    Route::prefix('wa')->name('wa.')->group(function () {
+        Route::get('/',                 [WaUiController::class, 'index'])->name('index');
+        Route::get('/refresh',          [WaUiController::class, 'refresh'])->name('refresh');
+        Route::get('/qr',               [WaUiController::class, 'qr'])->name('qr');
+        Route::post('/send',            [WaUiController::class, 'send'])->name('send');
+        Route::post('/broadcast',       [WaUiController::class, 'broadcast'])->name('broadcast');
+        Route::get('/broadcast-status', [WaUiController::class, 'broadcastStatus'])->name('broadcast.status');
+        Route::post('/broadcast-cancel',[WaUiController::class, 'broadcastCancel'])->name('broadcast.cancel');
+    });
+
+    /* ---------------- Users (CRUD minimal) ---------------- */
+    Route::get   ('/users',             [UsersController::class, 'index'])->name('users.index');
+    Route::get   ('/users/create',      [UsersController::class, 'create'])->name('users.create');
+    Route::post  ('/users',             [UsersController::class, 'store'])->name('users.store');
+    Route::get   ('/users/{user}/edit', [UsersController::class,'edit'])->name('users.edit');
+    Route::put   ('/users/{user}',      [UsersController::class,'update'])->name('users.update');
+    Route::delete('/users/{user}',      [UsersController::class,'destroy'])->name('users.destroy');
+
+    /* ==================================================================
+    | MIKROTIK  (izin: manage mikrotik)
+    |==================================================================*/
+    Route::prefix('mikrotik')
+        ->name('mikrotik.')
+        ->middleware('permission:manage mikrotik')
+        ->group(function () {
+
+            // Index & tambah
+            Route::get ('/',           [MikrotikController::class, 'index'])->name('index');
+            Route::post('/',           [MikrotikController::class, 'store'])->name('store');
+
+            // Edit / update / delete
+            Route::get   ('/{mikrotik}/edit',   [MikrotikController::class,'edit'])->name('edit');
+            Route::put   ('/{mikrotik}',        [MikrotikController::class,'update'])->name('update');
+            Route::delete('/{mikrotik}',        [MikrotikController::class,'destroy'])->name('destroy');
+            Route::post  ('/{mikrotik}/delete', [MikrotikController::class,'delete'])->name('delete'); // kompat
+
+            // Dashboard & monitor
+            Route::get ('/{mikrotik}/dashboard', [MikrotikController::class,'dashboard'])->name('dashboard');
+            Route::get ('/{mikrotik}/monitor',   [MikrotikController::class,'monitor'])->name('monitor');
+            Route::post ('/{mikrotik}/monitor/interface', [MikrotikController::class,'addInterfaceTarget'])
+                ->name('monitor.addInterface');
+
+            // PPPoE
+            Route::get  ('/{mikrotik}/pppoe',            [MikrotikController::class,'pppIndex'])->name('pppoe');
+            Route::post ('/{mikrotik}/pppoe/add',        [MikrotikController::class,'pppAdd'])->name('pppoe.add');
+            Route::post ('/{mikrotik}/pppoe/edit',       [MikrotikController::class,'pppEdit'])->name('pppoe.edit');
+            Route::post ('/{mikrotik}/pppoe/delete',     [MikrotikController::class,'pppoeDelete'])->name('pppoe.delete');
+            Route::post ('/{mikrotik}/pppoe/profile/add',[MikrotikController::class,'pppProfileAdd'])->name('pppoe.profile.add');
+            Route::post ('/{mikrotik}/pppoe/record',     [MikrotikController::class,'pppRecord'])->name('pppoe.record');
+
+            // VLAN & Bridge
+            Route::post ('/{mikrotik}/vlan',   [MikrotikController::class,'vlanCreate'])->name('vlan');
+            Route::post ('/{mikrotik}/bridge', [MikrotikController::class,'bridgeCreate'])->name('bridge');
+
+            // IP Static
+            Route::get  ('/{mikrotik}/ip-static',         [MikrotikController::class,'ipStatic'])->name('ipstatic');
+            Route::post ('/{mikrotik}/ip-static/add',     [MikrotikController::class,'ipStaticAdd'])->name('ipstatic.add');
+            Route::post ('/{mikrotik}/ip-static/remove',  [MikrotikController::class,'ipStaticRemove'])->name('ipstatic.remove');
+            Route::post ('/{mikrotik}/ip-static/record',  [MikrotikController::class,'ipStaticRecord'])->name('ipstatic.record');
+
+            // Apply RADIUS ke router
+            Route::post ('/{mikrotik}/radius/provision', [MikrotikController::class,'provisionRadiusAndRouter'])
+                ->name('radius.provision');
+        });
+
+    // Shortcut buka device terakhir (opsional)
+    Route::get('/mikrotik-latest', function () {
+        $last = \App\Models\Mikrotik::orderByDesc('id')->first();
+        return $last
+            ? redirect()->route('mikrotik.dashboard', ['mikrotik' => $last->id])
+            : redirect()->route('mikrotik.index');
+    })->name('mikrotik.latest');
+
+    // Fallback monitor endpoints (kompat lama)
+    Route::post('/mkmon/{mikrotik}', [MikrotikController::class, 'monitor'])->name('mkmon');
+    Route::post('/monq/{mikrotik}',  [MikrotikController::class, 'monitorQueue'])->name('monq');
+    Route::post('/monx/{id}', function ($id, \Illuminate\Http\Request $r) {
+        $m = \App\Models\Mikrotik::findOrFail($id);
+        $iface = $r->input('iface');
+        try {
+            $c = new \RouterOS\Client([
+                'host'=>$m->host,'user'=>$m->username,'pass'=>$m->password,
+                'port'=>$m->port ?: 8728,'timeout'=>5,'attempts'=>1
+            ]);
+            $q = (new \RouterOS\Query('/interface/monitor-traffic'))
+                ->equal('interface', $iface)->equal('once', 'true');
+            $res = $c->query($q)->read();
+            $rx = (int)($res[0]['rx-bits-per-second'] ?? 0);
+            $tx = (int)($res[0]['tx-bits-per-second'] ?? 0);
+            return response()->json(['rx'=>$rx,'tx'=>$tx]);
+        } catch (\Throwable $e) {
+            \Log::error('MONX fail: '.$e->getMessage());
+            return response()->json(['rx'=>0,'tx'=>0,'err'=>$e->getMessage()], 500);
+        }
+    })->name('monx');
+
+    /* ==================================================================
+    | RADIUS UI (izin standar)
+    |==================================================================*/
+    Route::prefix('radius')->name('radius.')->group(function () {
+        Route::get ('/users',           [\App\Http\Controllers\RadiusUiController::class,'users'])->name('users');
+        Route::post('/users',           [\App\Http\Controllers\RadiusUiController::class,'usersStore'])->name('users.store');
+        Route::post('/users/password',  [\App\Http\Controllers\RadiusUiController::class,'usersUpdatePassword'])->name('users.password');
+        Route::post('/users/plan',      [\App\Http\Controllers\RadiusUiController::class,'usersUpdatePlan'])->name('users.plan');
+        Route::post('/users/status',    [\App\Http\Controllers\RadiusUiController::class,'usersUpdateStatus'])->name('users.status');
+
+        // Import dari Mikrotik (read-only)
+        Route::post('/users/import',    [\App\Http\Controllers\RadiusUiController::class,'importUsers'])->name('users.import');
+
+        // Import OFFLINE CSV/TXT (opsional, aman tidak sentuh Mikrotik)
+        Route::post('/users/import-file', [\App\Http\Controllers\RadiusUiController::class,'usersImportFromFile'])->name('users.import.file');
+
+        // perbaiki mapping ke method yang benar (dipertahankan sesuai file kamu)
+        Route::post('/users/delete',    [\App\Http\Controllers\RadiusUiController::class,'usersDelete'])->name('users.delete');
+
+        /* duplikasi import routes (dipertahankan agar tidak merusak alur yang ada) */
+        Route::post('/users/import',      [\App\Http\Controllers\RadiusUiController::class,'importUsers'])->name('users.import');           // import dari Mikrotik (tetap ada)
+        Route::post('/users/import-file', [\App\Http\Controllers\RadiusUiController::class,'usersImportFile'])->name('users.import.file'); // VARIAN BARU
+
+        // NEW: bulk delete
+        Route::post('/users/bulk-delete', [\App\Http\Controllers\RadiusUiController::class,'usersBulkDelete'])->name('users.bulkDelete');
+
+        Route::get ('/sessions',        [\App\Http\Controllers\RadiusUiController::class,'sessions'])->name('sessions');
+
+        // JSON untuk auto-refresh Sessions
+        Route::get('/sessions/json', [RadiusApiController::class,'sessionsJson'])->name('sessions.json');
+
+        // CoA disconnect
+        Route::post('/coa/disconnect', [RadiusApiController::class,'coaDisconnect'])->name('coa.disconnect');
+    });
+
+    /* ========= Role User ============*/
+    Route::middleware(['auth','role:admin'])->group(function () {
+        Route::get ('/settings/permissions',  [SettingsController::class,'permissions'])->name('settings.permissions');
+        Route::post('/settings/permissions',  [SettingsController::class,'permissionsSave'])->name('settings.permissions.save');
+    });
+
+    /* ========================  WA Staff & Tickets ====================*/
+    Route::get('/wa/staff', [WaStaffController::class, 'index'])->name('wa.staff.index');
+    Route::post('/wa/staff', [WaStaffController::class, 'store'])->name('wa.staff.store');
+    Route::delete('/wa/staff/{id}', [WaStaffController::class, 'delete'])->name('wa.staff.delete');
+
+    Route::get('/tickets', [TicketUiController::class, 'index'])->name('tickets.index');
+    Route::post('/tickets/{ticket}/close', [TicketUiController::class, 'close'])->name('tickets.close');
+
+    /* ======================== TELEGRAM (Panel) =======================
+       - Hanya untuk user yang terautentikasi dan memiliki permission
+       - Route name prefix: telegram.*
+       ==================================================================*/
+
+    // Webhook public (gunakan secret)
+    Route::post('/telegram/{secret}', [\App\Http\Controllers\TelegramWebhookController::class, 'handle'])
+    	->name('telegram.webhook')->where('secret', '[A-Za-z0-9\-\_]+');
+
+    // Panel broadcast (permission manage telegram)
+    Route::middleware(['auth','permission:manage telegram'])->prefix('telegram')->name('telegram.')->group(function () {
+    	Route::get('/', [\App\Http\Controllers\TelegramController::class, 'index'])->name('index');
+    	Route::post('/broadcast', [\App\Http\Controllers\TelegramController::class, 'broadcast'])->name('broadcast');
+    });
+
+
+    Route::middleware(['auth','permission:manage settings'])->group(function () {
+    	Route::get('/settings/telegram', [\App\Http\Controllers\TelegramController::class, 'settingsPage'])
+            ->name('settings.telegram');
+
+    	Route::post('/settings/telegram/save', [\App\Http\Controllers\TelegramController::class, 'settingsSave'])
+            ->name('settings.telegram.save');
+
+    	Route::post('/settings/telegram/{id}/set-webhook', [\App\Http\Controllers\TelegramController::class, 'setWebhook'])
+            ->name('settings.telegram.setwebhook');
+
+    	Route::delete('/settings/telegram/{id}', [\App\Http\Controllers\TelegramController::class, 'destroyBot'])
+            ->name('settings.telegram.destroy');
+    });
+
+    /* Route::prefix('telegram')
+        ->name('telegram.')
+        ->middleware('permission:manage telegram')
+        ->group(function () {
+            Route::get('/', [TelegramController::class, 'index'])->name('index');
+            Route::post('/broadcast', [TelegramController::class, 'broadcast'])->name('broadcast');
+            Route::post('/settings', [TelegramController::class, 'settings'])->name('settings');
+            // tambahkan route management tambahan nanti jika diperlukan (create, edit bot, set-webhook)
+        });*/
+
+});
+
+/* ==================  Client app ========================*/
+Route::prefix('client')->name('client.')->group(function () {
+    Route::get('/', function () { return redirect()->route('client.dashboard'); });
+
+    Route::get('/login', [ClientLogin::class, 'showLoginForm'])->name('login');
+    Route::post('/login', [ClientLogin::class, 'login'])->name('login.submit');
+    Route::post('/logout', [ClientLogin::class, 'logout'])->name('logout');
+
+    Route::middleware('auth')->group(function () {
+        Route::get('/home', fn() => redirect()->route('client.dashboard'))->name('home');
+        Route::get('/dashboard', [ClientDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/traffic', [ClientTrafficController::class, 'index'])->name('traffic');
+        Route::get('/traffic/data', [ClientTrafficController::class, 'data'])->name('traffic.data');
+        Route::get('/invoices', [ClientBillingController::class, 'index'])->name('invoices');
+        Route::get('/wifi', [ClientWifiController::class, 'form'])->name('wifi');
+        Route::post('/wifi', [ClientWifiController::class, 'update'])->name('wifi.update');
+    });
+});
+
+/* ==================  Staff Portal ========================*/
+Route::prefix('staff')->name('staff.')->group(function () {
+    Route::get('/', fn() => redirect()->route('staff.dashboard'));
+
+    // Login/Logout staff
+    Route::get('/login', [StaffLoginController::class, 'showLoginForm'])->name('login');
+    Route::post('/login', [StaffLoginController::class, 'login'])->name('login.submit');
+    Route::post('/logout', [StaffLoginController::class, 'logout'])->name('logout');
+
+    Route::middleware(['auth'])->group(function () {
+        // Dashboard for logged in staff
+        Route::get('/dashboard', [StaffDashboardController::class, 'index'])->name('dashboard');
+
+        // NOC (admin, operator)
+        Route::get('/noc', [StaffNocController::class, 'index'])
+            ->middleware('role_or_pass:admin|operator')
+            ->name('noc');
+        Route::get('/noc/sessions', [StaffNocController::class, 'sessions'])
+            ->middleware('role_or_pass:admin|operator')
+            ->name('noc.sessions');
+
+        // Tickets (admin, operator, staff, teknisi) -> teknisi tidak boleh create
+        Route::get('/tickets', [StaffTicketsController::class, 'index'])
+            ->middleware('role_or_pass:admin|operator|staff|teknisi')
+            ->name('tickets');
+        Route::post('/tickets', [StaffTicketsController::class, 'store'])
+            ->middleware('role_or_pass:admin|operator|staff')
+            ->name('tickets.store');
+
+        // Billing (admin, operator, staff)
+        Route::get('/billing', [StaffBillingController::class, 'index'])
+            ->middleware('role_or_pass:admin|operator|staff')
+            ->name('billing');
+    });
+
+    // Users CRUD (admin/operator)
+    Route::middleware(['auth','role_or_pass:admin|operator'])->group(function () {
+        Route::get ('/users',        [StaffUsersController::class, 'index'])->name('users.index');
+        Route::get ('/users/create', [StaffUsersController::class, 'create'])->name('users.create');
+        Route::post('/users',        [StaffUsersController::class, 'store'])->name('users.store');
+        Route::post('/users/{id}/activation/send', [StaffOtpController::class, 'sendActivation'])->name('users.activation.send');
+        Route::post('/users/{id}/password/send',   [StaffOtpController::class, 'sendReset'])->name('users.reset.send');
+    });
+
+    // Customers INDEX (semua role lihat; teknisi hanya lihat)
+    Route::middleware(['auth','role_or_pass:admin|operator|staff|teknisi'])->group(function () {
+        Route::get('/customers', [StaffCustomersController::class, 'index'])->name('customers.index');
+    });
+
+    // Customers CREATE/STORE (admin, operator, staff)
+    Route::middleware(['auth','role_or_pass:admin|operator|staff'])->group(function () {
+         Route::get ('/customers/create', [StaffCustomersController::class, 'create'])->name('customers.create');
+         Route::post('/customers',        [StaffCustomersController::class, 'store'])->name('customers.store');
+    });
+
+    // Customers Invoices & PAY (admin, operator, staff)
+    Route::middleware(['auth','role_or_pass:admin|operator|staff'])->group(function () {
+        Route::get ('/customers/{customer}/invoices', [StaffCustBillingController::class,'index'])->name('customers.invoices');
+        Route::post('/customers/{customer}/invoices', [StaffCustBillingController::class,'storeInvoice'])->name('customers.invoices.store');
+
+        // PAY: POST memproses; GET diarahkan balik agar tidak 404 jika dibuka manual
+        Route::post('/invoices/{invoice}/pay', [StaffCustBillingController::class,'pay'])->name('invoices.pay');
+        Route::get ('/invoices/{invoice}/pay', function () {
+            return redirect()->route('staff.billing')->with('err','Gunakan tombol Bayar (POST).');
+        })->name('invoices.pay.get');
+    });
+
+    // Perangkat (MikroTik) versi Staff (teknisi & admin)
+    Route::middleware(['auth','role_or_pass:teknisi|admin'])->prefix('devices')->name('devices.')->group(function () {
+        Route::get ('/',       [StaffDevicesController::class,'index'])->name('index');
+        Route::post('/',       [StaffDevicesController::class,'store'])->name('store');
+        Route::delete('/{id}', [StaffDevicesController::class,'destroy'])->name('destroy');
+        Route::get('/{id}',    [StaffDevicesController::class,'show'])->name('show');
+
+    });
+
+    // Teknisi/Operator/Admin boleh ACCEPT customer -> tulis ke FreeRADIUS
+    Route::middleware(['auth','role_or_pass:teknisi|operator|admin'])->group(function () {
+        Route::post('/customers/{id}/accept', [\App\Http\Controllers\Staff\CustomersController::class, 'accept'])
+            ->name('customers.accept');   // hasil akhir: staff.customers.accept
+
+    });
+
+    // Billing (admin, operator, staff)
+    Route::get('/billing', [StaffBillingController::class, 'index'])
+        ->middleware(['auth','role_or_pass:billing|operator|admin|staff'])
+        ->name('billing');
+
+    // PAY: POST memproses; GET diarahkan balik agar tidak 404 kalau dibuka manual
+    Route::post('/invoices/{invoice}/pay', [StaffBillingController::class, 'pay'])
+        ->middleware(['auth','role_or_pass:billing|operator|admin|staff'])
+        ->name('invoices.pay');
+
+    Route::get('/invoices/{invoice}/pay', function () {
+        return redirect()->route('staff.billing')->with('err','Gunakan tombol Bayar (POST).');
+    })
+        ->middleware(['auth','role_or_pass:billing|operator|admin|staff'])
+        ->name('invoices.pay.get');
+
+});
+
+// >>> FINANCE_MODULE_LOADER
+if (file_exists(base_path('routes/finance.php'))) {
+    require base_path('routes/finance.php');
+}
+// <<< FINANCE_MODULE_LOADER
+
+
+// === Traffic Targets Loader (safe) ===
+require __DIR__.'/traffic_targets.php';
+
+// === Traffic Graphs Loader (safe) ===
+if (file_exists(__DIR__.'/traffic_graphs.php')) {
+    require __DIR__.'/traffic_graphs.php';
+}
+
+if (file_exists(base_path('routes/traffic_graphs_api.php'))) {
+    require base_path('routes/traffic_graphs_api.php');
+}

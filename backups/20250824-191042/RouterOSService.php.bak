@@ -1,0 +1,205 @@
+<?php
+namespace App\Services;
+
+use App\Models\Mikrotik;
+use Illuminate\Support\Facades\Log;
+use RouterOS\Client;
+
+/**
+ * RouterOS service – kompatibel ROS v6
+ * Catatan: seluruh method pakai query() bawaan evilfreelancer/routeros-api-php
+ */
+class RouterOSService
+{
+    /** @var Mikrotik */
+    protected $mk;
+    /** @var Client */
+    protected $client;
+
+    public function __construct(Mikrotik $mk)
+    {
+        $this->mk = $mk;
+        $this->client = new Client([
+            'host'     => $mk->host,
+            'user'     => $mk->username,
+            'pass'     => $mk->password,
+            'port'     => $mk->port ?: 8728,
+            'timeout'  => 8,
+            'attempts' => 1,
+        ]);
+    }
+
+    /**
+     * Wrapper aman: log & selalu kembalikan array
+     */
+    protected function safeQuery($cmd, array $params = [])
+    {
+        Log::info('[ROS_CMD] '.$cmd, $params);
+        $res = $this->client->query($cmd, $params)->read();
+        return is_array($res) ? $res : [];
+    }
+
+    /**
+     * Cari .id by filter (pakai /print + "?field" => value)
+     */
+    protected function findId($menu, array $filter)
+    {
+        $rows = $this->client->query($menu.'/print', $filter)->read();
+        if (is_array($rows) && isset($rows[0]['.id'])) {
+            return $rows[0]['.id'];
+        }
+        return null;
+    }
+
+    /* ================= INTERFACE ================= */
+
+    public function interfaces()
+    {
+        $rows = $this->safeQuery('/interface/print');
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'name' => isset($r['name']) ? $r['name'] : '',
+                'type' => isset($r['type']) ? $r['type'] : '',
+            ];
+        }
+        return $out;
+    }
+
+    public function monitorInterface($iface)
+    {
+        // once-only monitor, proplist biar ringan
+        $rows = $this->client->query('/interface/monitor-traffic', [
+            '=.proplist' => 'rx-bits-per-second,tx-bits-per-second',
+            'numbers'    => $iface,
+            'once'       => '',
+        ])->read();
+
+        $rx = (isset($rows[0]['rx-bits-per-second'])) ? (int)$rows[0]['rx-bits-per-second'] : 0;
+        $tx = (isset($rows[0]['tx-bits-per-second'])) ? (int)$rows[0]['tx-bits-per-second'] : 0;
+        return ['rx' => $rx, 'tx' => $tx];
+    }
+
+    /* ================= VLAN & BRIDGE ================= */
+
+    public function addVlan($name, $iface, $vid)
+    {
+        $this->safeQuery('/interface/vlan/add', [
+            'name'      => $name,
+            'interface' => $iface,
+            'vlan-id'   => $vid,
+        ]);
+    }
+
+    public function addBridge($name)
+    {
+        $this->safeQuery('/interface/bridge/add', ['name' => $name]);
+    }
+
+    public function addBridgePort($bridge, $iface)
+    {
+        $this->safeQuery('/interface/bridge/port/add', [
+            'bridge'    => $bridge,
+            'interface' => $iface,
+        ]);
+    }
+
+    /* ================= PPPoE ================= */
+
+    public function pppSecrets()
+    {
+        return $this->safeQuery('/ppp/secret/print');
+    }
+
+    public function pppActive()
+    {
+        return $this->safeQuery('/ppp/active/print');
+    }
+
+    public function pppAdd($name, $password, $profile = 'default')
+    {
+        $this->safeQuery('/ppp/secret/add', [
+            'name'     => $name,
+            'password' => $password,
+            'service'  => 'pppoe',
+            'profile'  => $profile,
+        ]);
+    }
+
+    public function pppSet($name, array $changes)
+    {
+        $id = $this->findId('/ppp/secret', ['?name' => $name]);
+        if ($id) {
+            $params = array_merge(['.id' => $id], $changes);
+            $this->safeQuery('/ppp/secret/set', $params);
+        }
+    }
+
+    public function pppRemove($name)
+    {
+        $id = $this->findId('/ppp/secret', ['?name' => $name]);
+        if ($id) {
+            $this->safeQuery('/ppp/secret/remove', ['.id' => $id]);
+        }
+    }
+
+    /* ========= PPP Profiles (untuk dropdown & kelola profil) ========= */
+
+    public function pppProfiles()
+    {
+        return $this->safeQuery('/ppp/profile/print');
+    }
+
+    public function pppProfileAdd($name, $rateLimit = null, $parentQueue = null)
+    {
+        $p = ['name' => $name];
+        if ($rateLimit)   $p['rate-limit'] = $rateLimit;     // contoh: "5M/5M"
+        if ($parentQueue) $p['parent-queue'] = $parentQueue; // contoh: "global"
+        $this->safeQuery('/ppp/profile/add', $p);
+    }
+
+    public function pppProfileRemove($name)
+    {
+        $id = $this->findId('/ppp/profile', ['?name' => $name]);
+        if ($id) {
+            $this->safeQuery('/ppp/profile/remove', ['.id' => $id]);
+        }
+    }
+
+    /* ================= IP ADDRESS (STATIC) ================= */
+
+    public function ipAddressAdd($address, $interface, $comment = '')
+    {
+        $p = [
+            'address'   => $address,   // format: 10.10.10.2/24
+            'interface' => $interface,
+        ];
+        if ($comment !== '') $p['comment'] = $comment;
+        $this->safeQuery('/ip/address/add', $p);
+    }
+
+    public function ipAddressRemove($address)
+    {
+        $id = $this->findId('/ip/address', ['?address' => $address]);
+        if ($id) {
+            $this->safeQuery('/ip/address/remove', ['.id' => $id]);
+        }
+    }
+
+    /* ====== Back-compat (Address-List) – dibiarkan ada kalau dipakai view lama ====== */
+
+    public function addToAddressList($list, $ip, $comment = '')
+    {
+        $p = ['list' => $list, 'address' => $ip];
+        if ($comment !== '') $p['comment'] = $comment;
+        $this->safeQuery('/ip/firewall/address-list/add', $p);
+    }
+
+    public function removeFromAddressList($list, $ip)
+    {
+        $id = $this->findId('/ip/firewall/address-list', ['?list' => $list, '?address' => $ip]);
+        if ($id) {
+            $this->safeQuery('/ip/firewall/address-list/remove', ['.id' => $id]);
+        }
+    }
+}

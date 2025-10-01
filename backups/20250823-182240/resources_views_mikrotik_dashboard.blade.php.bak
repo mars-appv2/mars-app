@@ -1,0 +1,105 @@
+@extends('layouts.app')
+
+@section('content')
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-xl font-semibold">Mikrotik – Dashboard</h2>
+    <div class="flex gap-2">
+      <a href="{{ route('mikrotik.index') }}" class="btn-outline">Table List</a>
+      <a href="{{ route('mikrotik.pppoe', ['mikrotik'=>$mikrotik->id]) }}" class="btn">Kelola PPPoE</a>
+    </div>
+  </div>
+
+  {{-- PILIH INTERFACE --}}
+  <div class="card">
+    <div class="flex items-end gap-3">
+      <div>
+        <label class="lbl">Interface</label>
+        <select id="iface" class="inp">
+          @foreach($if as $row)
+            @php
+              $name = $row['name'] ?? ($row['.id'] ?? '');
+              $type = $row['type'] ?? ($row['default-name'] ?? 'other');
+            @endphp
+            @if($name)
+              <option value="{{ $name }}">{{ $name }} ({{ $type }})</option>
+            @endif
+          @endforeach
+        </select>
+      </div>
+      <button id="btnView" class="btn">LIHAT</button>
+      @if(!empty($err))
+        <div class="text-red-400 font-medium">{{ $err }}</div>
+      @endif
+    </div>
+
+    <div id="monitor" class="mt-5">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <div class="muted mb-1">RX</div>
+          <div class="stat" id="rxText">0 bps</div>
+          <div class="bar"><div id="rxbar"></div></div>
+        </div>
+        <div>
+          <div class="muted mb-1">TX</div>
+          <div class="stat" id="txText">0 bps</div>
+          <div class="bar"><div id="txbar"></div></div>
+        </div>
+      </div>
+      <div class="muted mt-2">Polling tiap 2 detik setelah klik LIHAT.</div>
+    </div>
+  </div>
+</div>
+
+{{-- STYLE SINGKAT --}}
+<style>
+  .card{background:#0f1428;border:1px solid #1e2a4a;border-radius:14px;padding:16px}
+  .btn{background:#4da3ff;color:#001a33;padding:.55rem .9rem;border-radius:.6rem;text-decoration:none;border:0;font-weight:600}
+  .btn-outline{border:1px solid #4da3ff;color:#4da3ff;padding:.5rem .85rem;border-radius:.6rem;text-decoration:none}
+  .inp{background:#0b1020;border:1px solid #243154;border-radius:.6rem;color:#e8eefc;padding:.55rem .6rem;min-width:220px}
+  .lbl{display:block;color:#9fb3d9;font-size:.85rem;margin-bottom:.3rem}
+  .muted{color:#9fb3d9}
+  .stat{font-size:1.25rem;font-weight:700}
+  .bar{height:10px;background:#213158;border-radius:6px;overflow:hidden}
+  #rxbar,#txbar{height:100%;width:0;transition:width .25s ease}
+  #rxbar{background:#22d3ee}
+  #txbar{background:#8b5cf6}
+</style>
+
+{{-- JS POLLING --}}
+<script>
+const urlMon = "{{ route('mikrotik.monitor',['mikrotik'=>$mikrotik->id]) }}";
+let timer=null;
+
+function human(n){
+  const u=['bps','Kbps','Mbps','Gbps','Tbps']; let i=0, v=Number(n)||0;
+  while(v>=1000 && i<u.length-1){ v/=1000; i++; }
+  return v.toFixed(2)+' '+u[i];
+}
+function draw(rx,tx){
+  document.getElementById('rxText').textContent = human(rx);
+  document.getElementById('txText').textContent = human(tx);
+  const max = Math.max(rx,tx,1);
+  document.getElementById('rxbar').style.width = (rx/max*100)+'%';
+  document.getElementById('txbar').style.width = (tx/max*100)+'%';
+}
+async function poll(){
+  const iface = document.getElementById('iface').value;
+  try{
+    const r = await fetch(urlMon + '?iface=' + encodeURIComponent(iface), {
+      headers:{'X-Requested-With':'XMLHttpRequest'}
+    });
+    if(!r.ok) return;
+    const data = await r.json();
+    const row = Array.isArray(data)&&data.length?data[0]:data;
+    const rx = Number(row['rx-bits-per-second'] || row['rx-bps'] || row['rx'] || 0);
+    const tx = Number(row['tx-bits-per-second'] || row['tx-bps'] || row['tx'] || 0);
+    draw(rx,tx);
+  }catch(e){ /* silent */ }
+}
+document.getElementById('btnView').addEventListener('click', ()=>{
+  if(timer) clearInterval(timer);
+  poll(); timer = setInterval(poll, 2000);
+});
+</script>
+@endsection

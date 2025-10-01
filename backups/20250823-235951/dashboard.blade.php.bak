@@ -1,0 +1,226 @@
+@extends('layouts.app')
+@section('content')
+<style>
+.badge{font-size:.72rem;padding:.2rem .45rem;border-radius:.4rem;border:1px solid #2a3350;background:rgba(99,102,241,.15);color:#cbd5e1}
+.m-card{background:#121827;border:1px solid #2a3350;border-radius:14px}
+.m-muted{color:#95a3bf}
+.m-btn{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:10px;padding:.55rem 1rem;transition:.15s}
+.m-btn:hover{filter:brightness(1.12);transform:translateY(-1px)}
+.m-btnp{background:#3b82f6;border-color:#3b82f6}
+.m-inp,.m-sel{background:#0c101c;border:1px solid #2a3350;border-radius:10px;color:#e6eaf2;padding:.55rem .75rem}
+.m-sel{padding-right:2.2rem;appearance:none}
+.m-selwrap{position:relative}
+.m-selwrap:after{content:'▾';position:absolute;right:.65rem;top:50%;transform:translateY(-50%);color:#95a3bf}
+.small{font-size:.85rem;color:#95a3bf}
+</style>
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex gap-2 items-center">
+    <a href="{{ route('mikrotik.index') }}" class="m-btn">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="m-btn m-btnp">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="m-btn">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic',$mikrotik) }}" class="m-btn">IP Static</a>
+    <span class="badge">hotfix-v5.2</span>
+  </div>
+
+  <div class="m-card">
+    <div class="p-4 space-y-4">
+      <div>
+        <label class="small mb-1 block">Pilih interface untuk dimonitor</label>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="m-selwrap min-w-[260px]">
+            <select id="iface" class="m-sel w-full">
+              <option value="" disabled selected>— pilih interface —</option>
+              @foreach($if as $row)
+                @php $name=$row['name']??''; $type=$row['type']??''; @endphp
+                <option value="{{ $name }}">{{ $name }} {{ $type? '(' . $type . ')' : '' }}</option>
+              @endforeach
+            </select>
+          </div>
+          <button id="btnAdd" class="m-btn">Tambah</button>
+          <button id="btnStart" class="m-btn m-btnp">Mulai</button>
+    <button id="btnStop"  class="m-btn">Stop</button>
+        </div>
+        <div id="mk-note" class="small mt-2" style="color:#fca5a5"></div>
+      </div>
+
+      <div id="chips" class="flex flex-wrap gap-2"></div>
+      <div id="cards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+
+      <!-- === Group Toolbar (v3) === -->
+      <div id="grpBar" class="flex flex-wrap items-center gap-2 mt-3">
+        <select id="grpSelect" class="m-sel" style="max-width:220px"><option value="">— pilih group —</option></select>
+        <input id="grpName" class="m-inp" style="max-width:240px" placeholder="Nama group (mis: uplink)"/>
+        <button id="grpSave"   class="m-btn">Simpan</button>
+        <button id="grpDelete" class="m-btn">Hapus</button>
+        <button id="grpEdit"   class="m-btn">Edit</button>
+        <button id="grpStart"  class="m-btn m-btnp">Mulai</button>
+      </div>
+      <!-- === /Group Toolbar (v3) === -->
+      <div class="small">Polling tiap 2 detik setelah klik <b>Mulai</b>.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  if(window.__mkmon_v52) return; window.__mkmon_v52=true;
+  const tok='{{ csrf_token() }}';
+  const urlG='{{ route('mikrotik.monitor',['mikrotik'=>$mikrotik->id]) }}';
+  const urlP='{{ url('/mkmon/'.$mikrotik->id) }}';
+  const urlX='{{ url('/monx/'.$mikrotik->id) }}';
+  const sel=document.getElementById('iface'), chips=document.getElementById('chips'), cards=document.getElementById('cards');
+  const note=document.getElementById('mk-note'); const btnAdd=document.getElementById('btnAdd');
+  const btnStart=document.getElementById('btnStart'); const btnStop=document.getElementById('btnStop');
+  const list=new Set(); let timer=null;
+  const fmt=n=>{const u=['bps','Kbps','Mbps','Gbps'];let i=0,x=+n||0;while(x>=1000&&i<u.length-1){x/=1000;i++;}return x.toFixed(2)+' '+u[i];}
+  const say=m=>{note.textContent=m||'';}
+  const card=(iface)=>{const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_');const d=document.createElement('div');
+    d.className='p-4 rounded-lg border border-slate-800'; d.style.background='#0f1526';
+    d.innerHTML=`<div class="small mb-1">${iface}</div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><div class="small">RX</div><div id="rxN_${id}" class="text-xl font-semibold">0 bps</div><progress id="rxB_${id}" max="10000000000" value="0" class="w-full"></progress></div>
+        <div><div class="small">TX</div><div id="txN_${id}" class="text-xl font-semibold">0 bps</div><progress id="txB_${id}" max="10000000000" value="0" class="w-full"></progress></div>
+      </div>`; return d; }
+  const ensure=(iface)=>{const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_'); if(!document.getElementById('rxN_'+id)) cards.appendChild(card(iface));}
+  const chipsRender=()=>{chips.innerHTML='';[...list].forEach(iface=>{const s=document.createElement('span'); s.setAttribute('data-iface', iface); s.title = iface;
+    s.className='px-2 py-1 border border-slate-700 rounded text-xs'; s.style.background='rgba(148,163,184,.08)'; s.style.color='#cbd5e1';
+    s.innerHTML=`${iface} <button class="text-rose-300" title="hapus">&times;</button>`;
+    s.querySelector('button').onclick=()=>{list.delete(iface); const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_'); const n=document.getElementById('rxN_'+id); if(n) n.closest('div.p-4').remove(); chipsRender();};
+    chips.appendChild(s);});}
+  btnAdd.onclick=()=>{const v=sel && sel.value; if(!v){say('Pilih interface dulu');return;} list.add(v); ensure(v); chipsRender(); say('');}
+  btnStart.onclick=()=>{ if(timer){clearInterval(timer);} if(list.size===0){say('Tambah minimal 1 interface');return;}
+    async function one(ifx){
+      try{
+        let r=await fetch(urlG+'?iface='+encodeURIComponent(ifx),{method:'GET'});
+        if(!r.ok){ r=await fetch(urlP,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':tok},body:JSON.stringify({iface:ifx})});}
+        if(!r.ok){ r=await fetch(urlX,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':tok},body:JSON.stringify({iface:ifx})});}
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const d=await r.json(); const id=ifx.replace(/[^a-zA-Z0-9_-]/g,'_'); const rx=+d.rx||0, tx=+d.tx||0;
+        const rxN=document.getElementById('rxN_'+id), txN=document.getElementById('txN_'+id);
+        const rxB=document.getElementById('rxB_'+id), txB=document.getElementById('txB_'+id);
+        if(rxN) rxN.textContent=fmt(rx); if(txN) txN.textContent=fmt(tx); if(rxB) rxB.value=rx; if(txB) txB.value=tx;
+      }catch(e){}
+    }
+    const tick=()=>Promise.all([...list].map(one)); tick(); timer=setInterval(tick,2000); say('');
+  }
+  btnStop.onclick=()=>{ if(timer){clearInterval(timer); timer=null;} }
+})();
+</script>
+@endsection
+
+</div>
+
+
+
+
+<!-- ===== Group Logic v4 (force localStorage) ===== -->
+<script id="mkGroupV4">
+(function(){
+  if (window.__mkGroupV4) return; window.__mkGroupV4 = true;
+
+  const getId = ()=>{ try { return {{ $mikrotik->id ?? 0 }} } catch(e){ return 0 } };
+  const key   = ()=>`mk_groups_${getId()}`;
+
+  // Elemen UI yang sudah ada
+  const dd       = document.getElementById('grpSelect');
+  const inNm     = document.getElementById('grpName');
+  const bSv      = document.getElementById('grpSave');
+  const bDl      = document.getElementById('grpDelete');
+  const bEd      = document.getElementById('grpEdit');
+  const bGo      = document.getElementById('grpStart');
+  const btnAdd   = document.getElementById('btnAdd')   || Array.from(document.querySelectorAll('button')).find(b=>/tambah/i.test(b.innerText));
+  const btnStart = document.getElementById('btnStart') || Array.from(document.querySelectorAll('button')).find(b=>/mulai/i.test(b.innerText));
+  const ifaceSel = document.getElementById('iface')    || document.querySelector('select[name="iface"],.iface-select,.form-select');
+
+  function toast(m, ok=true){ if (window.toastr) { ok?toastr.success(m):toastr.error(m) } else { console[(ok?'log':'warn')](m) } }
+
+  function lsGet(){
+    try { return JSON.parse(localStorage.getItem(key())||'{}') || {} } catch(e){ return {} }
+  }
+  function lsSet(obj){
+    try { localStorage.setItem(key(), JSON.stringify(obj||{})); } catch(e){}
+  }
+
+  function currentIfaces(){
+    // Ambil dari chip yang muncul setelah klik "Tambah"
+    const chips = document.querySelectorAll('#chips span,[data-iface]');
+    const out = [];
+    chips.forEach(el=>{
+      let v = el.getAttribute('data-iface');
+      if (!v) {
+        const raw = (el.textContent||'').trim();
+        v = raw.split(/\s+/)[0]; // ambil kata pertama = nama interface
+        if (v) el.setAttribute('data-iface', v);
+      }
+      if (v) out.push(v);
+    });
+    if (!out.length && ifaceSel && ifaceSel.value) out.push(ifaceSel.value);
+    // dedupe
+    return Array.from(new Set(out));
+  }
+
+  function loadGroups(){
+    if (!dd) return;
+    dd.innerHTML = '<option value="">— pilih group —</option>';
+    const g = (lsGet().groups)||{};
+    Object.keys(g).sort().forEach(n=>{
+      const o = document.createElement('option');
+      o.value = n;
+      o.textContent = `${n} (${(g[n]||[]).length})`;
+      dd.appendChild(o);
+    });
+  }
+
+  function saveGroup(){
+    const name = (inNm?.value||'').trim();
+    const list = currentIfaces();
+    if (!name){ toast('Isi nama group', false); return; }
+    if (!list.length){ toast('Tambah minimal 1 interface', false); return; }
+    const j = lsGet(); j.groups = j.groups || {}; j.groups[name] = list; lsSet(j);
+    loadGroups(); toast(`Group "${name}" tersimpan (${list.length} iface)`);
+  }
+
+  function deleteGroup(){
+    const v = dd?.value || '';
+    if (!v){ toast('Pilih group dulu', false); return; }
+    const j = lsGet(); if (j.groups && j.groups[v]) { delete j.groups[v]; lsSet(j); }
+    loadGroups(); toast(`Group "${v}" dihapus`);
+  }
+
+  function startGroup(){
+    const v = dd?.value || '';
+    if (!v){ toast('Pilih group dulu', false); return; }
+    const j = lsGet(); const list = (j.groups && j.groups[v]) ? j.groups[v] : [];
+    if (!list.length){ toast('Group kosong', false); return; }
+    if (!ifaceSel || !btnAdd || !btnStart){ toast('Elemen UI tidak lengkap', false); return; }
+
+    // klik "Tambah" untuk tiap iface, lalu klik "Mulai"
+    for (const s of list){
+      ifaceSel.value = s;
+      ifaceSel.dispatchEvent(new Event('change', {bubbles:true}));
+      btnAdd.click();
+    }
+    btnStart.click();
+    toast(`Mulai group "${v}" (${list.length} iface)`);
+  }
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    bSv && bSv.addEventListener('click', saveGroup);
+    bDl && bDl.addEventListener('click', deleteGroup);
+    bEd && bEd.addEventListener('click', ()=>{ const v = dd?.value||''; if (v && inNm){ inNm.value=v; inNm.focus(); }});
+    bGo && bGo.addEventListener('click', startGroup);
+    loadGroups();
+
+    // Otomatis beri data-iface ke chip yang baru muncul
+    const chips = document.getElementById('chips');
+    if (chips){
+      new MutationObserver(()=>{ chips.querySelectorAll('span').forEach(el=>{
+        if (!el.getAttribute('data-iface')){
+          const t=(el.textContent||'').trim().split(/\s+/)[0]; if (t) el.setAttribute('data-iface', t);
+        }
+      })}).observe(chips, {childList:true, subtree:true});
+    }
+  });
+})();
+</script>
+<!-- ===== /Group Logic v4 ===== -->

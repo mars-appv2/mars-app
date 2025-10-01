@@ -1,0 +1,52 @@
+@extends('layouts.app')
+@section('content')
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex gap-2">
+    <a href="{{ route('mikrotik.index') }}" class="btn btn-secondary">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="btn btn-secondary">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="btn btn-primary">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic',$mikrotik) }}" class="btn btn-secondary">IP Static</a>
+  </div>
+
+  @php
+    $profilesList = collect($profiles ?? [])->map(function($x){
+      return is_array($x) ? ($x['name'] ?? '') : $x;
+    })->filter()->values()->all();
+  @endphp
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="card bg-slate-900/60 border border-slate-800">
+      <div class="card-header font-semibold">Tambah Client</div>
+      <div class="card-body space-y-3">
+        <form method="POST" action="{{ route('mikrotik.pppoe.add',$mikrotik) }}">
+          @csrf
+          <div><label class="block text-sm mb-1">Username</label><input name="name" class="form-input w-full" required></div>
+          <div><label class="block text-sm mb-1">Password</label><input name="password" class="form-input w-full" required></div>
+          <div>
+            <label class="block text-sm mb-1">Profil</label>
+            <select name="profile" class="form-select w-full">
+              <option value="default">default</option>
+              @foreach($profilesList as $p)<option value="{{ $p }}">{{ $p }}</option>@endforeach
+            </select>
+          </div>
+          <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" name="record" value="1" class="form-checkbox"> Rekam trafik client ini</label>
+          <div class="pt-2"><button class="btn btn-primary">SIMPAN</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card bg-slate-900/60 border border-slate-800">
+      <div class="card-header font-semibold">Tambah Profil</div>
+      <div class="card-body space-y-3">
+        <form method="POST" action="{{ route('mikrotik.pppoe.profileAdd',$mikrotik) }}">
+          @csrf
+          <div><label class="block text-sm mb-1">Nama Profil</label><input name="name" class="form-input w-full" placeholder="mis: 10M" required></div>
+          <div><label class="block text-sm mb-1">Rate-limit (up/down)</label><input name="rate" class="form-input w-full" placeholder="10M/10M" required></div>
+          <div><label class="block text-sm mb-1">Parent Queue (opsional)</label><input name="parent" class="form-input w-full" placeholder="mis: global"></div>
+          <div class="pt-2"><button class="btn btn-primary">SIMPAN</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+@endsection

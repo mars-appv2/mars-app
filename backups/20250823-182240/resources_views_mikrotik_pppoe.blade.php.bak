@@ -1,0 +1,97 @@
+@extends('layouts.app')
+
+@section('content')
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-xl font-semibold">PPPoE — {{ $mikrotik->name }} ({{ $mikrotik->host }}:{{ $mikrotik->port }})</h2>
+    <div class="flex gap-2">
+      <form method="GET" action="{{ route('mikrotik.pppoe',['mikrotik'=>$mikrotik->id]) }}" class="flex gap-2">
+        <input name="q" value="{{ $q ?? '' }}" class="inp" placeholder="Cari user/IP/komentar…">
+        <button class="btn" type="submit">Search</button>
+        @if(!empty($q))
+          <a class="btn-outline" href="{{ route('mikrotik.pppoe',['mikrotik'=>$mikrotik->id]) }}">Reset</a>
+        @endif
+      </form>
+      <a href="{{ route('mikrotik.dashboard',['mikrotik'=>$mikrotik->id]) }}" class="btn-outline">Kembali Dashboard</a>
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="card">
+      <div class="font-semibold mb-2">Tambah Client</div>
+      <form method="POST" action="{{ route('mikrotik.pppoe.add',['mikrotik'=>$mikrotik->id]) }}">
+        @csrf
+        <label class="lbl">Username</label>
+        <input name="name" class="inp" required>
+        <label class="lbl mt-3">Password</label>
+        <input name="password" class="inp" required>
+        <label class="lbl mt-3">Profil</label>
+        <input name="profile" class="inp" placeholder="default">
+        <label class="lbl mt-3"><input type="checkbox" name="record" value="1"> Rekam trafik client ini</label>
+        <div class="mt-3"><button class="btn">SIMPAN</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="font-semibold mb-2">Active Sessions</div>
+      <div class="muted mb-2">Total: {{ count($active) }}</div>
+      <div class="tbl">
+        <div class="tr th"><div>Nama</div><div>Address</div><div>Uptime</div></div>
+        @forelse($active as $a)
+          <div class="tr">
+            <div>{{ $a['name'] ?? '' }}</div>
+            <div>{{ $a['address'] ?? '' }}</div>
+            <div>{{ $a['uptime'] ?? '' }}</div>
+          </div>
+        @empty
+          <div class="muted">Tidak ada sesi aktif.</div>
+        @endforelse
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="font-semibold mb-2">Secrets</div>
+    <div class="tbl">
+      <div class="tr th">
+        <div>Nama</div><div>Profil</div><div>Status</div><div class="right">Aksi</div>
+      </div>
+      @forelse($secrets as $s)
+        <div class="tr">
+          <div>{{ $s['name'] ?? '' }}</div>
+          <div>{{ $s['profile'] ?? '' }}</div>
+          <div>{{ ($s['disabled'] ?? 'false') === 'true' ? 'Disabled' : 'Enabled' }}</div>
+          <div class="right">
+            <form method="POST" action="{{ route('mikrotik.pppoe.edit',['mikrotik'=>$mikrotik->id]) }}" class="inline">
+              @csrf
+              <input type="hidden" name="name" value="{{ $s['name'] ?? '' }}">
+              <input type="hidden" name="disabled" value="{{ ($s['disabled'] ?? 'false')==='true' ? '' : '1' }}">
+              <button class="btn-outline">Toggle</button>
+            </form>
+            <form method="POST" action="{{ route('mikrotik.pppoe.delete',['mikrotik'=>$mikrotik->id]) }}" class="inline" onsubmit="return confirm('Hapus client {{ $s['name'] ?? '' }}?')">
+              @csrf
+              <input type="hidden" name="name" value="{{ $s['name'] ?? '' }}">
+              <button class="btn" style="background:#ef4444;color:#fff">Hapus</button>
+            </form>
+          </div>
+        </div>
+      @empty
+        <div class="muted">Data tidak ditemukan.</div>
+      @endforelse
+    </div>
+  </div>
+</div>
+
+<style>
+  .card{background:#0f1428;border:1px solid #1e2a4a;border-radius:14px;padding:16px}
+  .btn{background:#4da3ff;color:#001a33;padding:.5rem .9rem;border-radius:.6rem;text-decoration:none;border:0;font-weight:600}
+  .btn-outline{border:1px solid #4da3ff;color:#4da3ff;padding:.45rem .8rem;border-radius:.6rem;text-decoration:none;background:transparent}
+  .inp{background:#0b1020;border:1px solid #243154;border-radius:.6rem;color:#e8eefc;padding:.55rem .6rem}
+  .lbl{display:block;color:#9fb3d9;font-size:.9rem;margin:.3rem 0}
+  .tbl{display:grid;gap:6px}
+  .tr{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;align-items:center;background:#0b1020;border:1px solid #243154;border-radius:10px;padding:8px}
+  .tr.th{background:transparent;border:none;color:#9fb3d9;font-weight:600}
+  .right{text-align:right;display:flex;gap:8px;justify-content:flex-end}
+  .inline{display:inline}
+</style>
+@endsection

@@ -1,0 +1,217 @@
+@extends('layouts.app')
+@section('content')
+@php
+  // Normalisasi helper ke string
+  $toStr = function($v, $prefer=null){
+    if (is_string($v)) return $v;
+    if (is_numeric($v)) return (string)$v;
+    if (is_array($v)) {
+      if ($prefer && isset($v[$prefer])) return (string)$v[$prefer];
+      foreach (['name','profile','value','0'] as $k) {
+        if (isset($v[$k]) && (is_string($v[$k]) || is_numeric($v[$k]))) return (string)$v[$k];
+      }
+      $first = reset($v);
+      return is_string($first)||is_numeric($first) ? (string)$first : '';
+    }
+    if (is_object($v)) {
+      foreach (['name','profile','value'] as $k) {
+        if (isset($v->$k) && (is_string($v->$k) || is_numeric($v->$k))) return (string)$v->$k;
+      }
+      return method_exists($v,'__toString') ? (string)$v : '';
+    }
+    return '';
+  };
+
+  // Set nama-nama aktif
+  $activeNames = [];
+  foreach (($active ?? []) as $a) { $activeNames[] = $toStr($a,'name'); }
+  $activeSet = array_flip(array_filter($activeNames));
+
+  // Kumpulan profil (string saja)
+  $profileList = [];
+  if (!empty($profiles) && is_iterable($profiles)) {
+    foreach ($profiles as $p) { $profileList[] = $toStr($p); }
+  }
+  if (empty($profileList) && !empty($secrets) && is_iterable($secrets)) {
+    foreach ($secrets as $u) {
+      $pr = $toStr(is_array($u)?($u['profile']??'') : ($u->profile??''));
+      if ($pr) $profileList[] = $pr;
+    }
+  }
+  $profileList = array_values(array_unique(array_filter($profileList)));
+  if (empty($profileList)) $profileList = ['default'];
+
+  // Normalisasi baris users
+  $rows = [];
+  foreach (($secrets ?? []) as $u) {
+    $uname = $toStr(is_array($u)?($u['name']??'') : ($u->name??''));
+    if ($uname==='') continue;
+    $prof  = $toStr(is_array($u)?($u['profile']??'') : ($u->profile??''));
+    $svc   = $toStr(is_array($u)?($u['service']??'pppoe') : ($u->service??'pppoe'));
+    $isActive = isset($activeSet[$uname]);
+    // cek rekam (boleh berat sedikit)
+    $isRecorded = \App\Models\MonitorTarget::where([
+      'mikrotik_id'=>$mikrotik->id,
+      'target_type'=>'pppoe',
+      'target_key'=>$uname,
+      'enabled'=>true
+    ])->exists();
+    $rows[] = compact('uname','prof','svc','isActive','isRecorded');
+  }
+
+  $total = count($rows);
+  $aktif = count(array_filter($rows, fn($r)=>$r['isActive']));
+  $non   = $total - $aktif;
+@endphp
+
+<div class="container-fluid px-3">
+  <div class="d-flex align-items-center gap-2 mb-3">
+    <a href="{{ route('mikrotik.index') }}" class="btn btn-outline-secondary btn-sm">Table List</a>
+    <a href="{{ route('mikrotik.dashboard', $mikrotik) }}" class="btn btn-outline-secondary btn-sm">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe', $mikrotik) }}" class="btn btn-primary btn-sm">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic', $mikrotik) }}" class="btn btn-outline-secondary btn-sm">IP Static</a>
+    <div class="ms-auto text-muted small">
+      PPPoE — <strong>{{ $mikrotik->name }}</strong> ({{ $mikrotik->host }}:{{ $mikrotik->port }})
+    </div>
+  </div>
+
+  <div class="row g-3">
+    {{-- Tambah Client --}}
+    <div class="col-lg-6">
+      <div class="card" style="background:#0f1423;border:1px solid #1f2a45;">
+        <div class="card-body">
+          <h6 class="mb-3 text-light">Tambah Client</h6>
+          <form id="ppp-add" onsubmit="return false;">
+            @csrf
+            <div class="mb-2">
+              <label class="form-label text-muted">Username</label>
+              <input type="text" class="form-control text-light" name="name" placeholder="mis: user01" required>
+            </div>
+            <div class="mb-2">
+              <label class="form-label text-muted">Password</label>
+              <input type="text" class="form-control text-light" name="password" placeholder="•••••" required>
+            </div>
+            <div class="mb-2">
+              <label class="form-label text-muted">Profil</label>
+              <select class="form-select text-light" name="profile">
+                @foreach($profileList as $pname)
+                  <option value="{{ $pname }}">{{ $pname }}</option>
+                @endforeach
+              </select>
+            </div>
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="ppp-add-record" name="record">
+              <label class="form-check-label text-muted" for="ppp-add-record">Rekam trafik client ini</label>
+            </div>
+            <button class="btn btn-primary">SIMPAN</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    {{-- Tambah Profil --}}
+    <div class="col-lg-6">
+      <div class="card" style="background:#0f1423;border:1px solid #1f2a45;">
+        <div class="card-body">
+          <h6 class="mb-3 text-light">Tambah Profil</h6>
+          <form id="ppp-profile-add" onsubmit="return false;">
+            @csrf
+            <div class="mb-2">
+              <label class="form-label text-muted">Nama Profil</label>
+              <input type="text" class="form-control text-light" name="name" placeholder="mis: 10M" required>
+            </div>
+            <div class="mb-2">
+              <label class="form-label text-muted">Rate-limit (up/down)</label>
+              <input type="text" class="form-control text-light" name="rate" placeholder="10M/10M">
+            </div>
+            <div class="mb-3">
+              <label class="form-label text-muted">Parent Queue (opsional)</label>
+              <input type="text" class="form-control text-light" name="parent" placeholder="mis: global">
+            </div>
+            <button class="btn btn-primary">SIMPAN</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {{-- Kelola Client --}}
+  <div class="card mt-4" style="background:#0f1423;border:1px solid #1f2a45;">
+    <div class="card-body">
+      <div class="d-flex align-items-center mb-2">
+        <h6 class="mb-0 text-light">Kelola Client</h6>
+        <div class="ms-auto" style="max-width:340px;">
+          <input id="ppp-search" type="text" class="form-control text-light" placeholder="Cari username / profil / status …">
+        </div>
+      </div>
+
+      <div class="text-muted small mb-2">
+        Total: <strong>{{ $total }}</strong> — Active: <span class="badge bg-success">{{ $aktif }}</span>
+        — Inactive: <span class="badge bg-secondary">{{ $non }}</span>
+      </div>
+
+      <div class="table-responsive">
+        <table id="ppp-table" class="table table-dark table-hover align-middle mb-0" style="--bs-table-bg:#0f1423;">
+          <thead>
+            <tr class="text-muted">
+              <th>USERNAME</th>
+              <th style="width:220px;">PROFIL</th>
+              <th>SERVICE</th>
+              <th>STATUS</th>
+              <th>REKAM</th>
+              <th class="text-end">AKSI</th>
+            </tr>
+          </thead>
+          <tbody>
+          @foreach($rows as $r)
+            <tr data-row="{{ $r['uname'] }}">
+              <td class="fw-semibold">{{ $r['uname'] }}</td>
+              <td>
+                <div class="d-flex gap-2">
+                  <select class="form-select form-select-sm text-light ppp-prof" data-user="{{ $r['uname'] }}" style="min-width:180px;">
+                    @foreach($profileList as $pname)
+                      <option value="{{ $pname }}" @selected($pname==$r['prof'])>{{ $pname }}</option>
+                    @endforeach
+                  </select>
+                  <button class="btn btn-outline-primary btn-sm ppp-prof-save" data-user="{{ $r['uname'] }}">Ubah</button>
+                </div>
+              </td>
+              <td class="text-muted">{{ $r['svc'] }}</td>
+              <td>
+                @if($r['isActive'])
+                  <span class="badge bg-success">active</span>
+                @else
+                  <span class="badge bg-secondary">inactive</span>
+                @endif
+              </td>
+              <td>
+                <div class="form-check">
+                  <input class="form-check-input ppp-record" type="checkbox" data-user="{{ $r['uname'] }}" @checked($r['isRecorded'])>
+                </div>
+              </td>
+              <td class="text-end">
+                @if($r['isActive'])
+                  <button class="btn btn-outline-warning btn-sm ppp-disable" data-user="{{ $r['uname'] }}">Disable</button>
+                @else
+                  <button class="btn btn-outline-success btn-sm ppp-enable" data-user="{{ $r['uname'] }}">Enable</button>
+                @endif
+                <button class="btn btn-outline-danger btn-sm ms-2 ppp-del" data-user="{{ $r['uname'] }}">Delete</button>
+              </td>
+            </tr>
+          @endforeach
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .form-control.text-light, .form-select.text-light{
+    background:#0e1321!important;color:#e5ecff!important;border-color:#26314f!important;
+  }
+  ::placeholder{color:#9fb2d6!important;opacity:.7;}
+</style>
+
+<script src="{{ asset('js/pppoe-ui-v2.js') }}?v=1" defer></script>
+@endsection

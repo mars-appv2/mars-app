@@ -1,0 +1,20 @@
+<?php
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration {
+  public function up(): void {
+    Schema::create('plans', function (Blueprint $t) {
+      $t->id();
+      $t->string('name',100);
+      $t->unsignedInteger('price');          // harga /bulan (rupiah)
+      $t->string('rate_limit',60)->nullable(); // contoh "10M/2M"
+      $t->string('service_type',20)->default('pppoe'); // pppoe|hotspot
+      $t->string('router_profile',64)->nullable();     // nama profile di MikroTik
+      $t->string('radius_group',64)->nullable();       // kalau pakai radusergroup
+      $t->timestamps();
+    });
+  }
+  public function down(): void { Schema::dropIfExists('plans'); }
+};

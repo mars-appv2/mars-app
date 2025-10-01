@@ -1,0 +1,63 @@
+@extends('layouts.app')
+@section('content')
+<style>
+.badge{font-size:.72rem;padding:.2rem .45rem;border-radius:.4rem;border:1px solid #2a3350;background:rgba(99,102,241,.15);color:#cbd5e1}
+.m-card{background:#121827;border:1px solid #2a3350;border-radius:14px}
+.m-btn{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:10px;padding:.55rem 1rem;transition:.15s}
+.m-btn:hover{filter:brightness(1.12);transform:translateY(-1px)}
+.m-btnp{background:#3b82f6;border-color:#3b82f6}
+.m-inp{background:#0c101c;border:1px solid #2a3350;border-radius:10px;color:#e6eaf2;width:100%;padding:.55rem .75rem}
+.m-lab{color:#95a3bf;font-size:.85rem;margin-bottom:.35rem;display:block}
+</style>
+
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex items-center gap-2">
+    <a href="{{ route('mikrotik.index') }}" class="m-btn">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="m-btn">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="m-btn">PPPoE</a>
+    <span class="badge">IP Static (hotfix-v5.2)</span>
+  </div>
+
+  <div class="m-card p-5 mb-6">
+    <div class="text-lg text-slate-200 font-semibold mb-3">Tambah IP ke Address-List</div>
+    <form method="POST" action="{{ route('mikrotik.ipstatic.add',$mikrotik) }}" class="grid md:grid-cols-4 gap-3 items-end">
+      @csrf
+      <div><label class="m-lab">IP Address</label><input name="ip" class="m-inp" placeholder="192.168.10.10/32" required></div>
+      <div><label class="m-lab">List Name</label><input name="list" class="m-inp" placeholder="static"></div>
+      <div><label class="m-lab">Komentar</label><input name="comment" class="m-inp" placeholder="opsional"></div>
+      <div><button class="m-btn m-btnp">TAMBAH</button></div>
+    </form>
+  </div>
+
+  <div class="m-card p-5">
+    <div class="text-lg text-slate-200 font-semibold mb-3">Aksi Cepat</div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div class="m-card p-4">
+        <div class="text-slate-200 font-semibold mb-2" style="font-size:1rem">Rekam Trafik IP</div>
+        <form method="POST" action="{{ route('mikrotik.ipstatic.record',$mikrotik) }}" class="grid md:grid-cols-3 gap-3 items-end">
+          @csrf
+          <div><label class="m-lab">IP Address</label><input name="ip" class="m-inp" placeholder="192.168.10.10/32" required></div>
+          <div>
+            <label class="m-lab">Aksi</label>
+            <select name="enable" class="m-inp">
+              <option value="1">Rekam</option>
+              <option value="">Stop</option>
+            </select>
+          </div>
+          <div><button class="m-btn m-btnp">JALANKAN</button></div>
+        </form>
+      </div>
+
+      <div class="m-card p-4">
+        <div class="text-slate-200 font-semibold mb-2" style="font-size:1rem">Hapus dari Address-List</div>
+        <form method="POST" action="{{ route('mikrotik.ipstatic.remove',$mikrotik) }}" class="grid md:grid-cols-3 gap-3 items-end">
+          @csrf
+          <div><label class="m-lab">IP Address</label><input name="ip" class="m-inp" placeholder="192.168.10.10/32" required></div>
+          <div><label class="m-lab">List Name</label><input name="list" class="m-inp" placeholder="static"></div>
+          <div><button class="m-btn">HAPUS</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+@endsection

@@ -1,0 +1,125 @@
+@extends('layouts.app')
+@section('content')
+<style>
+  .badge{font-size:.72rem;padding:.2rem .45rem;border-radius:.4rem;border:1px solid #2a3350;background:rgba(99,102,241,.15);color:#cbd5e1}
+  .m-card{background:#121827;border:1px solid #2a3350;border-radius:14px}
+  .m-btn{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:10px;padding:.55rem 1rem;transition:.15s}
+  .m-btn:hover{filter:brightness(1.12);transform:translateY(-1px)}
+  .m-btnp{background:#3b82f6;border-color:#3b82f6}
+  .m-inp,.m-sel{background:#0c101c;border:1px solid #2a3350;border-radius:10px;color:#e6eaf2;padding:.55rem .75rem}
+  .m-sel{padding-right:2.2rem;appearance:none}
+  .m-selwrap{position:relative}
+  .m-selwrap:after{content:'▾';position:absolute;right:.65rem;top:50%;transform:translateY(-50%);color:#95a3bf}
+  .small{font-size:.85rem;color:#95a3bf}
+</style>
+
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex gap-2 items-center">
+    <a href="{{ route('mikrotik.index') }}" class="m-btn">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="m-btn">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="m-btn">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic',$mikrotik) }}" class="m-btn m-btnp">IP Static</a>
+    <span class="badge">hotfix-ipstatic-ui</span>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <!-- Tambah IP ke Address-List -->
+    <div class="m-card">
+      <div class="p-4 space-y-3">
+        <div class="text-lg font-semibold mb-1">Tambah IP ke Address-List</div>
+        <form method="POST" action="{{ route('mikrotik.ipstatic.add',$mikrotik) }}" class="space-y-3">
+          @csrf
+          <div>
+            <label class="small block mb-1">IP / CIDR</label>
+            <input name="ip" class="m-inp w-full" placeholder="mis: 1.2.3.4 atau 1.2.3.0/24" required>
+          </div>
+          <div>
+            <label class="small block mb-1">Nama List</label>
+            <input name="list" class="m-inp w-full" value="static">
+          </div>
+          <div>
+            <label class="small block mb-1">Komentar (opsional)</label>
+            <input name="comment" class="m-inp w-full" placeholder="mis: blokir / whitelist">
+          </div>
+          <label class="small flex items-center gap-2">
+            <input type="checkbox" id="ipRecAdd"> Rekam trafik IP ini
+          </label>
+          <button class="m-btn m-btnp">SIMPAN</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Hapus dari Address-List -->
+    <div class="m-card">
+      <div class="p-4 space-y-3">
+        <div class="text-lg font-semibold mb-1">Hapus dari Address-List</div>
+        <form method="POST" action="{{ route('mikrotik.ipstatic.remove',$mikrotik) }}" class="space-y-3" onsubmit="return confirm('Hapus IP dari list?')">
+          @csrf
+          <div>
+            <label class="small block mb-1">IP / CIDR</label>
+            <input name="ip" class="m-inp w-full" required>
+          </div>
+          <div>
+            <label class="small block mb-1">Nama List</label>
+            <input name="list" class="m-inp w-full" value="static">
+          </div>
+          <button class="m-btn">HAPUS</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Kelola Rekaman Trafik IP -->
+  <div class="m-card mt-4">
+    <div class="p-4">
+      <div class="text-lg font-semibold mb-3">Kelola Rekaman Trafik IP</div>
+      <div class="grid md:grid-cols-[2fr_1fr] gap-3 items-center">
+        <input id="ipRecInput" class="m-inp w-full" placeholder="Tulis IP yang ingin direkam / hentikan rekam">
+        <label class="small flex items-center gap-2">
+          <input type="checkbox" id="ipRecCheck"> Aktifkan rekam
+        </label>
+      </div>
+      <div class="small mt-2">Centang untuk mulai rekam; hilangkan centang untuk berhenti. Tidak perlu reload.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '{{ csrf_token() }}';
+  const recUrl = "{{ route('mikrotik.ipstatic.record',$mikrotik) }}";
+
+  async function sendRecord(ip, enable){
+    if(!ip) return;
+    try {
+      await fetch(recUrl, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRF-TOKEN':token},
+        body: JSON.stringify({ ip, enable })
+      });
+    } catch(e){}
+  }
+
+  // Panel rekam manual
+  const ipBox  = document.getElementById('ipRecInput');
+  const ipCk   = document.getElementById('ipRecCheck');
+  if(ipBox && ipCk){
+    ipCk.addEventListener('change',()=> sendRecord(ipBox.value.trim(), ipCk.checked?1:0));
+  }
+
+  // Jika di form tambah IP dicentang "Rekam", setelah submit kita kirim request rekam via fetch (tanpa cegat flow server)
+  const addRek = document.getElementById('ipRecAdd');
+  if(addRek){
+    addRek.closest('form').addEventListener('submit',()=> {
+      const ipVal = addRek.closest('form').querySelector('input[name="ip"]')?.value?.trim() || '';
+      if(addRek.checked && ipVal) {
+        // kirim async; tidak blokir form submit
+        sendRecord(ipVal, 1);
+      }
+    });
+  }
+})();
+</script>
+<!-- mk-autosubmit-v1 --><script>(function(){  function markButtons(scope){    (scope||document).querySelectorAll('button, a.btn').forEach(function(b){      var txt=(b.textContent||'').trim().toLowerCase();      if(['simpan','delete','hapus','disable','enable','rekam','ubah'].indexOf(txt)>-1){        b.setAttribute('data-autosubmit','1');      }    });  }  document.addEventListener('click',function(ev){    var btn=ev.target.closest('[data-autosubmit]');    if(!btn) return;    var f=btn.closest('form');    if(f){ ev.preventDefault(); try{ f.submit(); }catch(e){ console.error(e);} }  });  document.addEventListener('DOMContentLoaded',function(){ markButtons(document); });})();</script>
+<!-- mk-force-submit-v3 --><script>(function(){  if(window.__mk_force_submit_v3) return; window.__mk_force_submit_v3=true;  function fix(){    document.querySelectorAll('form').forEach(function(f){      f.querySelectorAll('button').forEach(function(b){        var t=(b.getAttribute('type')||'').toLowerCase();        if(t===''||t==='button'){ b.setAttribute('type','submit'); }      });    });  }  document.addEventListener('DOMContentLoaded',fix);})();</script>
+@endsection

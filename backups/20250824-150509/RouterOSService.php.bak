@@ -1,0 +1,183 @@
+<?php
+namespace App\Services;
+
+use App\Models\Mikrotik;
+use RouterOS\Client;
+use RouterOS\Query;
+
+class RouterOSService
+{
+    protected $client;
+    protected $m;
+
+    public function __construct(Mikrotik $m)
+    {
+        $this->m = $m;
+        $this->client = new Client([
+            'host'     => $m->host,
+            'user'     => $m->username,
+            'pass'     => $m->password,
+            'port'     => $m->port ?: 8728,
+            'timeout'  => 8,
+            'attempts' => 1,
+        ]);
+        \Log::info('[ROS] connected', ['host'=>$m->host,'port'=>$m->port,'user'=>$m->username]);
+    }
+
+    protected function run(Query $q): array
+    {
+        try {
+            $resp = $this->client->query($q)->read();
+            if (!empty($resp) && isset($resp[0]) && is_array($resp[0]) && (isset($resp[0]['message']) || isset($resp[0]['category']))) {
+                \Log::error('[ROS_ERR] trap', ['path'=>$this->pathOf($q), 'resp'=>$resp]);
+                return [];
+            }
+            return $resp ?? [];
+        } catch (\Throwable $e) {
+            \Log::error('[ROS_ERR] exception', ['path'=>$this->pathOf($q), 'err'=>$e->getMessage()]);
+            return [];
+        }
+    }
+
+    private function pathOf(Query $q): string
+    {
+        try {
+            $ref = new \ReflectionClass($q);
+            $prop = $ref->getProperty('query');
+            $prop->setAccessible(true);
+            return (string)$prop->getValue($q);
+        } catch (\Throwable $e) {
+            return 'unknown';
+        }
+    }
+
+    /* ============ INTERFACE ============ */
+    public function interfaces(): array
+    {
+        return $this->run(new Query('/interface/print'));
+    }
+
+    public function monitorInterface(string $iface): array
+    {
+        try {
+            $q = (new Query('/interface/monitor-traffic'))
+                ->equal('interface', $iface)
+                ->equal('once', '');
+            $r = $this->client->query($q)->read();
+            $row = $r[0] ?? [];
+            $rx = isset($row['rx-bits-per-second']) ? (int)$row['rx-bits-per-second'] : 0;
+            $tx = isset($row['tx-bits-per-second']) ? (int)$row['tx-bits-per-second'] : 0;
+            return ['rx'=>$rx,'tx'=>$tx];
+        } catch (\Throwable $e) {
+            \Log::error('[ROS_ERR] monitor', ['iface'=>$iface, 'err'=>$e->getMessage()]);
+            return ['rx'=>0,'tx'=>0];
+        }
+    }
+
+    /* ============ IP ADDRESS (bukan address-list) ============ */
+    public function ipAddresses(): array
+    {
+        return $this->run(new Query('/ip/address/print'));
+    }
+
+    public function addIpAddress(string $address, string $interface, string $comment=''): void
+    {
+        \Log::info('[ROS_CMD] ip.address.add', compact('address','interface','comment'));
+        $q = (new Query('/ip/address/add'))
+            ->equal('address', $address)
+            ->equal('interface', $interface);
+        if ($comment !== '') $q->equal('comment', $comment);
+        $this->run($q);
+    }
+
+    public function removeIpAddress(string $address): void
+    {
+        \Log::info('[ROS_CMD] ip.address.remove', compact('address'));
+        $id = $this->findId('/ip/address', ['?address'=>$address]);
+        if ($id) $this->run((new Query('/ip/address/remove'))->equal('.id', $id));
+        else \Log::error('[ROS_ERR] ip.address.remove.not_found', ['address'=>$address]);
+    }
+
+    /* ============ (Tetap disimpan) ADDRESS-LIST helper ============ */
+    public function addToAddressList(string $list, string $ip, string $comment=''): void
+    {
+        \Log::info('[ROS_CMD] address-list.add', compact('list','ip','comment'));
+        $q = (new Query('/ip/firewall/address-list/add'))
+            ->equal('list', $list)
+            ->equal('address', $ip);
+        if ($comment !== '') $q->equal('comment', $comment);
+        $this->run($q);
+    }
+
+    public function removeFromAddressList(string $list, string $ip): void
+    {
+        \Log::info('[ROS_CMD] address-list.remove', compact('list','ip'));
+        $id = $this->findId('/ip/firewall/address-list', ['?list'=>$list,'?address'=>$ip]);
+        if ($id) $this->run((new Query('/ip/firewall/address-list/remove'))->equal('.id', $id));
+    }
+
+    protected function findId(string $path, array $filters)
+    {
+        $q = new Query($path.'/print');
+        foreach ($filters as $k=>$v) $q->where($k, $v);
+        $r = $this->run($q);
+        return $r[0]['.id'] ?? null;
+    }
+
+    /* ============ PPPoE ============ */
+    public function pppSecrets(): array     { return $this->run(new Query('/ppp/secret/print')); }
+    public function pppActive(): array      { return $this->run(new Query('/ppp/active/print')); }
+    public function pppProfiles(): array    { return $this->run(new Query('/ppp/profile/print')); }
+
+    public function pppAdd(string $name, string $password, string $profile='default', string $comment=''): void
+    {
+        \Log::info('[ROS_CMD] ppp.add', compact('name','profile'));
+        $q = (new Query('/ppp/secret/add'))
+            ->equal('name', $name)
+            ->equal('password', $password)
+            ->equal('service', 'pppoe')
+            ->equal('disabled', 'no');
+        if ($profile !== '') $q->equal('profile', $profile);
+        if ($comment !== '') $q->equal('comment', $comment);
+        $this->run($q);
+
+        $id = $this->findId('/ppp/secret', ['?name'=>$name]);
+        if (!$id) \Log::error('[ROS_ERR] ppp.add.not_created', ['name'=>$name, 'profile'=>$profile]);
+        else      \Log::info('[ROS_CMD] ppp.add.ok', ['name'=>$name, 'id'=>$id]);
+    }
+
+    public function pppSet(string $name, array $attrs): void
+    {
+        \Log::info('[ROS_CMD] ppp.set', ['name'=>$name,'attrs'=>$attrs]);
+        $id = $this->findId('/ppp/secret', ['?name'=>$name]);
+        if (!$id) { \Log::error('[ROS_ERR] ppp.set.not_found', ['name'=>$name]); return; }
+
+        if (array_key_exists('disabled', $attrs)) {
+            $v = $attrs['disabled'];
+            if ($v === true || $v === 1 || $v === '1') $attrs['disabled'] = 'yes';
+            elseif ($v === false || $v === 0 || $v === '0' || $v === '') $attrs['disabled'] = 'no';
+        }
+
+        $q = (new Query('/ppp/secret/set'))->equal('.id', $id);
+        foreach ($attrs as $k=>$v) { if ($v !== null) $q->equal($k, $v); }
+        $this->run($q);
+    }
+
+    public function pppRemove(string $name): void
+    {
+        \Log::info('[ROS_CMD] ppp.remove', compact('name'));
+        $id = $this->findId('/ppp/secret', ['?name'=>$name]);
+        if ($id) $this->run((new Query('/ppp/secret/remove'))->equal('.id', $id));
+        else \Log::error('[ROS_ERR] ppp.remove.not_found', ['name'=>$name]);
+    }
+
+    public function pppProfileAdd(string $name, ?string $rateLimit=null, ?string $localAddr=null, ?string $remotePool=null): void
+    {
+        \Log::info('[ROS_CMD] ppp.profile.add', compact('name','rateLimit'));
+        $q = (new Query('/ppp/profile/add'))->equal('name', $name);
+        if ($rateLimit)  $q->equal('rate-limit', $rateLimit);
+        if ($localAddr)  $q->equal('local-address', $localAddr);
+        if ($remotePool) $q->equal('remote-address', $remotePool);
+        $this->run($q);
+    }
+}

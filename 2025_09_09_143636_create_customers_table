@@ -1,0 +1,40 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+class CreateCustomersTable extends Migration
+{
+    public function up()
+    {
+        if (!Schema::hasTable('customers')) {
+            Schema::create('customers', function (Blueprint $table) {
+                $table->id();
+                $table->string('name', 120);
+                $table->string('username', 120)->unique();
+                $table->string('password_plain', 128)->nullable();     // untuk provisioning ke MikroTik; boleh dihapus kalau tak perlu simpan
+                $table->string('email', 190)->nullable();
+                $table->string('phone', 32)->nullable();
+                $table->string('address', 190)->nullable();
+
+                $table->unsignedBigInteger('plan_id')->nullable();      // jika ada tabel plans
+                $table->unsignedBigInteger('mikrotik_id')->nullable();  // device router
+                $table->string('service_type', 20)->default('pppoe');   // pppoe|hotspot|other
+                $table->string('router_profile', 64)->nullable();       // mis. PPP profile di MikroTik
+                $table->unsignedInteger('vlan_id')->nullable();
+                $table->string('ip_address', 64)->nullable();
+                $table->boolean('is_active')->default(true);
+                $table->unsignedBigInteger('created_by')->nullable();    // staff yg buat
+                $table->text('note')->nullable();
+                $table->timestamps();
+
+                $table->index(['mikrotik_id','service_type']);
+            });
+        }
+    }
+    public function down()
+    {
+        Schema::dropIfExists('customers');
+    }
+}

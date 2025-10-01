@@ -1,0 +1,65 @@
+<?php
+
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Http\Request;
+use App\Http\Controllers\TrafficTargetsController;
+
+// Semua endpoint di bawah /traffic/*
+Route::middleware(['auth'])->prefix('traffic')->group(function () {
+
+    // ====== ROUTES UTAMA ======
+    Route::prefix('targets')->name('traffic.targets.')->group(function () {
+        // index tetap pakai controller kamu (normal)
+        Route::get   ('/',              [TrafficTargetsController::class, 'index'  ])->name('index');
+        Route::post  ('/',              [TrafficTargetsController::class, 'store'  ])->name('store');
+        Route::post  ('/{id}/toggle',   [TrafficTargetsController::class, 'toggle' ])->name('toggle');
+        Route::get   ('/{id}/export',   [TrafficTargetsController::class, 'export' ])->name('export');
+        Route::delete('/{id}',          [TrafficTargetsController::class, 'destroy'])->name('destroy');
+
+        // === OVERRIDE anti-loop: show tidak lagi memanggil controller,
+        //     tapi langsung render view daftar (tanpa redirect sama sekali)
+        Route::get('{id}', function ($id) {
+            // data minimal yang dibutuhkan view targets.blade.php
+            $devices = DB::table('mikrotiks')->select('id','name','host')->get();
+            $targets = DB::table('traffic_targets')
+                ->orderByDesc('id')
+                ->get();
+
+            // Optional: biar bisa di-highligt di UI, kita kirim selectedId
+            return view('traffic.targets', [
+                'devices'     => $devices,
+                'targets'     => $targets,
+                'selectedId'  => (int)$id,
+            ]);
+        })->whereNumber('id')->name('show');
+    });
+
+    // ====== LEGACY URL: /traffic/target/view?mikrotik_id=...&target=... ======
+    // Cari berdasarkan kolom yang ADA (lihat struktur tabel kamu) lalu arahkan ke show di atas (anti-loop)
+    Route::get('/target/view', function (Request $r) {
+        $mikrotikId = (int) $r->query('mikrotik_id');
+        $key        = trim((string) $r->query('target', ''));
+
+        if (!$mikrotikId || $key === '') abort(404, 'Missing mikrotik_id or target');
+
+        // Berdasarkan skema kamu:
+        // ["id","mikrotik_id","target_type","target_key","label","queue_name","enabled","interval_sec","created_at","updated_at"]
+        if (!Schema::hasColumn('traffic_targets', 'target_key')) {
+            abort(404, 'Column target_key not found');
+        }
+
+        $row = DB::table('traffic_targets')
+            ->where('mikrotik_id', $mikrotikId)
+            ->where('target_key', $key)
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$row) abort(404, 'Target not found');
+
+        // Arahkan ke show YANG SUDAH anti-loop (closure di atas)
+        return redirect()->route('traffic.targets.show', $row->id);
+    })->name('traffic.targets.legacy_view');
+
+});

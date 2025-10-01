@@ -1,0 +1,59 @@
+@extends('layouts.app')
+@section('content')
+<div class="space-y-6">
+  <h2 class="text-xl font-semibold">IP Static — {{ $mikrotik->name }} ({{ $mikrotik->host }}:{{ $mikrotik->port }})</h2>
+  @include('mikrotik._tabs')
+
+  @if(session('ok')) <div class="card" style="border-color:#16a34a;color:#b7f7c2">{{ session('ok') }}</div> @endif
+  @if(session('err')) <div class="card" style="border-color:#ef4444;color:#ef9a9a">{{ session('err') }}</div> @endif
+
+  <div class="grid md:grid-cols-3 gap-6">
+    <div class="card">
+      <div class="font-semibold mb-2">Tambah ke Address-List</div>
+      <form method="POST" action="{{ route('mikrotik.ipstatic.add',['mikrotik'=>$mikrotik->id]) }}">
+        @csrf
+        <label class="lbl">IP / CIDR</label>
+        <input name="ip" class="inp w-64" placeholder="192.0.2.10/32" required>
+        <label class="lbl mt-3">Nama List</label>
+        <input name="list" class="inp w-64" value="static">
+        <label class="lbl mt-3">Komentar</label>
+        <input name="comment" class="inp w-64">
+        <div class="mt-3"><button class="btn">SIMPAN</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="font-semibold mb-2">Hapus dari Address-List</div>
+      <form method="POST" action="{{ route('mikrotik.ipstatic.remove',['mikrotik'=>$mikrotik->id]) }}">
+        @csrf
+        <label class="lbl">IP / CIDR</label>
+        <input name="ip" class="inp w-64" required>
+        <label class="lbl mt-3">Nama List (opsional)</label>
+        <input name="list" class="inp w-64" placeholder="default: static">
+        <div class="mt-3"><button class="btn" style="background:#ef4444;color:#fff">HAPUS</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="font-semibold mb-2">Rekam Trafik IP</div>
+      <form method="POST" action="{{ route('mikrotik.ipstatic.record',['mikrotik'=>$mikrotik->id]) }}">
+        @csrf
+        <label class="lbl">IP</label>
+        <input name="ip" class="inp w-64" placeholder="192.0.2.10" required>
+        <label class="lbl mt-3"><input type="checkbox" name="enable" value="1"> Aktifkan rekam trafik</label>
+        <div class="mt-3"><button class="btn">SIMPAN</button></div>
+      </form>
+      <div class="muted mt-2">Catatan: list rekaman muncul di menu Traffic → Targets.</div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .card{background:#0f1428;border:1px solid #1e2a4a;border-radius:14px;padding:16px}
+  .btn{background:#4da3ff;color:#001a33;padding:.4rem .7rem;border-radius:.6rem;border:0;font-weight:600}
+  .inp{background:#0b1020;border:1px solid #243154;border-radius:.6rem;color:#e8eefc;padding:.45rem .6rem}
+  .w-64{min-width:16rem;max-width:16rem}
+  .lbl{display:block;color:#9fb3d9;font-size:.9rem;margin:.3rem 0}
+  .muted{color:#9fb3d9}
+</style>
+@endsection

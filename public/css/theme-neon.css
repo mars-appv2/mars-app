@@ -1,0 +1,211 @@
+:root{
+  --bg:#0b0a1e; --bg2:#10102a; --line:#232145; --text:#e5e7eb;
+  --muted:#9ca3af; --brand:#7c3aed;
+}
+*{box-sizing:border-box}
+body.theme-dark{background:linear-gradient(180deg,#0b0a1e,#0a0920 35%,#0b0a1e);color:var(--text);min-height:100vh}
+.sidebar{background:rgba(17,15,46,.92);border-right:1px solid var(--line);backdrop-filter: blur(6px)}
+.nav-item{display:block;padding:.55rem .75rem;border-radius:.6rem;color:#d1d5db;border:1px solid transparent}
+.nav-item:hover{background:rgba(124,58,237,.12);border-color:rgba(124,58,237,.28)}
+.nav-active{background:linear-gradient(90deg,#1f1b46,#251f58);border-color:#3b2c7a}
+.topbar{background:rgba(17,15,46,.85);border-bottom:1px solid var(--line);backdrop-filter: blur(6px)}
+.label{font-size:.72rem;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+.card{background:rgba(22,19,58,.9);border:1px solid var(--line);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.field{background:#12102f;border:1px solid var(--line);color:var(--text);border-radius:12px;padding:.6rem .8rem;width:100%}
+.btn-primary{background:linear-gradient(90deg,var(--brand),#5b41f5);color:#fff;border:0;box-shadow:0 10px 24px rgba(124,58,237,.35)}
+a{color:#a78bfa}
+
+/* ==== PATCH: form controls unify (input, select, textarea) ==== */
+:root{
+  --ink:#e6ecff; --muted:#94a3b8; --line:rgba(255,255,255,.06);
+  --accent:#5865f2; --panel: #111523;
+}
+
+/* label kecil di atas input */
+.m-lab{display:block;font-size:.8rem;color:var(--muted);margin-bottom:.35rem;letter-spacing:.02em}
+
+/* kartu panel */
+.m-card{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+
+/* tombol */
+.m-btn{background:transparent;border:1px solid var(--line);border-radius:12px;padding:.55rem .9rem}
+.m-btn:hover{background:rgba(255,255,255,.04)}
+.m-btnp{background:var(--accent);border-color:var(--accent);color:#fff}
+.m-btnp:hover{filter:brightness(1.06)}
+
+/* semua kontrol formulir pakai gaya sama */
+.m-inp,
+.m-inp[type=text],
+.m-inp[type=password],
+.m-inp[type=number],
+.m-inp[type=email],
+.m-inp[type=search],
+textarea.m-inp,
+select.m-inp{
+  width:100%;
+  background:transparent;
+  color:var(--ink);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:.55rem .75rem;
+  outline:none;
+}
+.m-inp:focus{border-color:rgba(88,101,242,.65);box-shadow:0 0 0 3px rgba(88,101,242,.15)}
+
+/* bikin <select> tidak putih & ada caret */
+select.m-inp{
+  -webkit-appearance:none; -moz-appearance:none; appearance:none;
+  background-image: linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+                    linear-gradient(135deg,var(--muted) 50%,transparent 50%),
+                    linear-gradient(to right,transparent,transparent);
+  background-position: calc(100% - 18px) calc(50% - 3px),
+                       calc(100% - 12px) calc(50% - 3px),
+                       calc(100% - 2.2rem) 0;
+  background-size: 6px 6px, 6px 6px, 1.8rem 100%;
+  background-repeat:no-repeat;
+  padding-right:2.2rem;
+}
+
+/* tabel sederhana */
+.m-card table{width:100%}
+.m-card thead th{color:var(--muted);font-weight:600;padding:.5rem .75rem;text-align:left}
+.m-card tbody td{padding:.75rem}
+.m-card tbody tr+tr{border-top:1px solid var(--line)}
+/* ==== END PATCH ==== */
+
+
+/* ===== Dark select fix + arrow ===== */
+select.m-inp {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--panel);
+  color: var(--text);                 /* no more putih kontras */
+  border: 1px solid rgba(255,255,255,.08);
+  padding-right: 2.25rem;             /* ruang buat ikon arrow */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' viewBox='0 0 24 24' stroke='%23a6b0cf' stroke-width='1.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right .65rem center;
+  background-size: 16px 16px;
+}
+select.m-inp:focus {
+  outline: none;
+  border-color: rgba(127,156,255,.45);
+  box-shadow: 0 0 0 3px rgba(127,156,255,.12);
+}
+select.m-inp::-ms-expand { display: none; }   /* IE/Edge legacy */
+
+select.m-inp option {
+  background: #0e1120;    /* warna menu dropdown */
+  color: #cdd6f4;
+}
+
+/* ===== Icon button ===== */
+.m-btn-icon { display: inline-flex; align-items: center; gap: .5rem; }
+.m-btn-ghost { background: transparent; border: 1px solid rgba(255,255,255,.12); }
+.m-btn-ghost:hover { background: rgba(255,255,255,.04); }
+
+
+/* icon-only button */
+.btn.btn-ghost{background:transparent;border:1px solid var(--line)}
+.btn.btn-ghost:hover{background:rgba(255,255,255,.04)}
+/* konsistensi input/select tinggi */
+.form-input,.form-select{min-height:2.5rem}
+
+
+/* ======= Neon UI helpers (global) ======= */
+.form-input,
+.form-select,
+input.form-input,
+select.form-select {
+  width: 100%;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+}
+.form-input::placeholder { color: var(--muted); }
+
+/* Select caret */
+.form-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 22px) calc(50% - 4px),
+    calc(100% - 16px) calc(50% - 4px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 36px;
+}
+
+/* Table wrapper */
+.tbl table { width: 100%; border-collapse: separate; border-spacing: 0 8px; }
+.tbl thead th {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); padding: 6px 12px;
+}
+.tbl tbody tr { background: rgba(255,255,255,0.02); }
+.tbl tbody td { padding: 8px 12px; }
+.tbl tbody tr:hover { background: rgba(255,255,255,0.04); }
+
+/* Buttons (if belum ada) */
+.btn { border-radius: 12px; padding: 9px 14px; font-weight: 600; }
+.btn-primary { background: #5b6cff; color: #fff; }
+.btn-secondary { background: #2c2f5a; color: #e8e8ff; }
+.btn-danger { background: #832b3b; color: #ffd7dc; }
+.btn:disabled { opacity:.6; cursor:not-allowed; }
+
+
+/* ===== Helpers untuk form gelap & tabel neon ===== */
+.form-input,
+.form-select,
+input.form-input,
+select.form-select {
+  width: 100%;
+  height: 42px;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+}
+.form-input::placeholder { color: var(--muted); }
+
+.form-select {
+  -webkit-appearance: none; appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 22px) calc(50% - 4px),
+    calc(100% - 16px) calc(50% - 4px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 36px;
+}
+
+.tbl table { width:100%; border-collapse:separate; border-spacing:0 8px; }
+.tbl thead th {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); padding: 6px 12px;
+}
+.tbl tbody tr { background: rgba(255,255,255,.02); }
+.tbl tbody td { padding: 8px 12px; vertical-align: middle; }
+.tbl tbody tr:hover { background: rgba(255,255,255,.04); }
+
+.inline { display: inline-block; }
+.actions-inline { display:flex; gap:.5rem; justify-content:flex-end; align-items:center; }
+
+/* Tombol (jaga konsisten tema) */
+.btn { border-radius:12px; padding:9px 14px; font-weight:600; }
+.btn-primary   { background:#5b6cff; color:#fff; }
+.btn-secondary { background:#2c2f5a; color:#e8e8ff; }
+.btn-danger    { background:#832b3b; color:#ffd7dc; }
+.btn:disabled { opacity:.6; cursor:not-allowed; }
+
+

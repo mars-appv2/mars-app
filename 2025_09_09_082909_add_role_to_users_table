@@ -1,0 +1,16 @@
+public function up()
+{
+    Schema::table('users', function (Blueprint $table) {
+        if (!Schema::hasColumn('users','role')) {
+            $table->string('role', 32)->nullable()->index();
+        }
+    });
+}
+public function down()
+{
+    Schema::table('users', function (Blueprint $table) {
+        if (Schema::hasColumn('users','role')) {
+            $table->dropColumn('role');
+        }
+    });
+}

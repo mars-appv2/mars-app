@@ -1,0 +1,26 @@
+:root{
+  --mars-accent:#4f9cff;
+  --mars-glow:rgba(79,156,255,.35);
+  --mars-bg:#0f1423; --mars-bg2:#11182a; --mars-border:#1f2942; --mars-text:#e8eefc;
+}
+input.form-control, select.form-control, .form-control,
+select, input[type=text], input[type=number], input[type=password]{
+  color:var(--mars-text)!important; background:var(--mars-bg)!important; border-color:#223!important;
+}
+select{
+  appearance:none;
+  background-image:url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBvbHlnb24gZmlsbD0iI2U4ZWVmYyIgZmlsbC1vcGFjaXR5PSIwLjg1IiBwb2ludHM9IjAgMiA2IDggMTIgMiIvPjwvc3ZnPg==");
+  background-repeat:no-repeat; background-position:right .75rem center; padding-right:2rem;
+}
+table tr td:last-child{
+  display:flex; align-items:center; flex-wrap:wrap; gap:.5rem;
+}
+.record-toggle{ display:flex; align-items:center; gap:.35rem; font-size:.92rem; color:#cfe3ff; }
+.record-toggle input[type=checkbox]{ width:1.05rem; height:1.05rem; }
+
+.mon-live, .mon-card.mon-live{
+  box-shadow:0 0 0 2px var(--mars-accent) inset, 0 0 22px var(--mars-glow);
+  background:linear-gradient(180deg, rgba(26,40,76,.92), rgba(18,27,48,.92)) !important;
+  transition: box-shadow .25s ease, background .25s ease;
+}
+.progress .bar{ transition:width .25s ease; }

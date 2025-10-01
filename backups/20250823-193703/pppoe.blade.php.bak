@@ -1,0 +1,119 @@
+@extends('layouts.app')
+@section('content')
+<div class="space-y-6">
+  <h2 class="text-xl font-semibold">PPPoE — {{ $mikrotik->name }} ({{ $mikrotik->host }}:{{ $mikrotik->port }})</h2>
+  @include('mikrotik._tabs')
+
+  @if(session('ok'))  <div class="card" style="border-color:#16a34a;color:#b7f7c2">{{ session('ok') }}</div> @endif
+  @if(session('err')) <div class="card" style="border-color:#ef4444;color:#ef9a9a">{{ session('err') }}</div> @endif
+
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="card">
+      <div class="font-semibold mb-2">Tambah Client</div>
+      <form method="POST" action="{{ route('mikrotik.pppoe.add',['mikrotik'=>$mikrotik->id]) }}">
+        @csrf
+        <input type="hidden" name="mode" value="client">
+        <label class="lbl">Username</label>
+        <input name="name" class="inp w-64" required>
+        <label class="lbl mt-3">Password</label>
+        <input name="password" class="inp w-64" required>
+        <label class="lbl mt-3">Profil</label>
+        <select name="profile" class="inp w-64">
+          @foreach(($profiles ?? []) as $p)
+            @php $pn=$p['name']??''; @endphp
+            @if($pn!=='') <option value="{{ $pn }}">{{ $pn }}</option> @endif
+          @endforeach
+        </select>
+        <label class="lbl mt-3"><input type="checkbox" name="record" value="1"> Rekam trafik client ini</label>
+        <div class="mt-3"><button class="btn">SIMPAN</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="font-semibold mb-2">Tambah Profil</div>
+      <form method="POST" action="{{ route('mikrotik.pppoe.add',['mikrotik'=>$mikrotik->id]) }}">
+        @csrf
+        <input type="hidden" name="mode" value="profile">
+        <label class="lbl">Nama Profil</label>
+        <input name="pname" class="inp w-64" placeholder="mis: 10M" required>
+        <label class="lbl mt-3">Rate-limit (up/down)</label>
+        <input name="rate" class="inp w-64" placeholder="10M/10M" required>
+        <label class="lbl mt-3">Parent Queue (opsional)</label>
+        <input name="parent" class="inp w-64" placeholder="mis: global">
+        <div class="mt-3"><button class="btn">SIMPAN</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="flex items-center justify-between">
+      <div class="font-semibold">Daftar Client</div>
+      <form method="GET" action="{{ route('mikrotik.pppoe',['mikrotik'=>$mikrotik->id]) }}">
+        <input type="text" name="q" value="{{ $q ?? '' }}" class="inp" placeholder="Cari user / coment / ip">
+        <button class="btn" style="margin-left:.5rem">Cari</button>
+      </form>
+    </div>
+
+    <div class="tbl mt-3">
+      <div class="tr th"><div>Nama</div><div>Profil</div><div>Status</div><div>Aksi</div></div>
+      @foreach(($secrets ?? []) as $s)
+        @php
+          $nm=$s['name']??''; $pf=$s['profile']??'default'; $dis=(($s['disabled']??'no')==='yes');
+          $act = collect($active ?? [])->firstWhere('name',$nm);
+          $rec = (bool)($recMap[$nm] ?? false);
+        @endphp
+        @if($nm!=='')
+          <div class="tr">
+            <div>{{ $nm }}</div>
+            <div>{{ $pf }}</div>
+            <div>{{ $dis ? 'Disabled' : ( $act ? 'Online ('.$act['address'].')' : 'Offline') }}</div>
+            <div class="flex gap-2">
+              {{-- Enable/Disable --}}
+              <form method="POST" action="{{ route('mikrotik.pppoe.edit',['mikrotik'=>$mikrotik->id]) }}">
+                @csrf
+                <input type="hidden" name="name" value="{{ $nm }}">
+                <input type="hidden" name="action" value="{{ $dis ? 'enable' : 'disable' }}">
+                <button class="btn">{{ $dis ? 'Enable' : 'Disable' }}</button>
+              </form>
+              {{-- Rekam --}}
+              <form method="POST" action="{{ route('mikrotik.pppoe.edit',['mikrotik'=>$mikrotik->id]) }}">
+                @csrf
+                <input type="hidden" name="name" value="{{ $nm }}">
+                <label class="lbl" style="display:flex;align-items:center;gap:.4rem;margin:0">
+                  <input type="checkbox" name="record" value="1" {{ $rec ? 'checked' : '' }} onchange="this.form.submit()">
+                  Rekam
+                </label>
+              </form>
+            </div>
+          </div>
+        @endif
+      @endforeach
+      @if(empty($secrets))
+        <div class="muted">Belum ada client.</div>
+      @endif
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="font-semibold mb-2">Daftar Profil PPPoE</div>
+    <div class="tbl">
+      <div class="tr th"><div>Nama</div><div>Rate-limit</div></div>
+      @foreach(($profiles ?? []) as $p)
+        @php $pn=$p['name']??''; $rl=$p['rate-limit']??''; @endphp
+        @if($pn!=='') <div class="tr"><div>{{ $pn }}</div><div>{{ $rl }}</div></div> @endif
+      @endforeach
+      @if(empty($profiles))<div class="muted">Profile list kosong.</div>@endif
+    </div>
+  </div>
+</div>
+
+<style>
+  .card{background:#0f1428;border:1px solid #1e2a4a;border-radius:14px;padding:16px}
+  .btn{background:#4da3ff;color:#001a33;padding:.4rem .7rem;border-radius:.6rem;border:0;font-weight:600}
+  .inp{background:#0b1020;border:1px solid #243154;border-radius:.6rem;color:#e8eefc;padding:.45rem .6rem}
+  .tbl{display:grid;gap:.35rem}
+  .tr{display:grid;grid-template-columns:2fr 1fr 1.2fr 1.6fr;gap:.5rem;align-items:center}
+  .tr.th{font-weight:700;color:#9fb3d9}
+  .muted{color:#9fb3d9}
+</style>
+@endsection

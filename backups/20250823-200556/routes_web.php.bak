@@ -1,0 +1,128 @@
+<?php
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
+use App\Http\Controllers\HomeController;
+
+Route::get('/', fn()=>redirect()->route('dashboard'));
+Auth::routes();
+
+Route::middleware(['auth'])->group(function(){
+  Route::get('/dashboard',[HomeController::class,'index'])->name('dashboard');
+});
+
+require __DIR__.'/mars_modules.php';
+require __DIR__.'/traffic.php';
+require __DIR__.'/payments.php';
+// Fallback: Paksa redirect ke Mikrotik id=1 jika param id tidak valid
+Route::middleware(['auth'])->group(function () {
+});
+
+/* ---- Default Mikrotik: otomatis pilih device yang ada ---- */
+Route::middleware(["auth"])->group(function () {
+    // /mikrotik -> kalau ada device, buka dashboard device terbaru; kalau tidak, ke index
+    Route::get("/mikrotik", function () {
+        $first = \App\Models\Mikrotik::orderByDesc("id")->first();
+        return $first
+            ? redirect()->route("mikrotik.dashboard", ["mikrotik" => $first->id])
+            : redirect()->route("mikrotik.index");
+    })->name("mikrotik.default");
+});
+/* ---- Mikrotik routes (pulihkan) ---- */
+Route::middleware(["auth"])->group(function () {
+    Route::get("/mikrotik", [\App\Http\Controllers\MikrotikController::class, "index"])
+        ->name("mikrotik.index");
+
+    Route::post("/mikrotik", [\App\Http\Controllers\MikrotikController::class, "store"])
+        ->name("mikrotik.store");
+
+    Route::post("/mikrotik/{mikrotik}/delete", [\App\Http\Controllers\MikrotikController::class, "delete"])
+        ->name("mikrotik.delete");
+
+    Route::get("/mikrotik/{mikrotik}/dashboard", [\App\Http\Controllers\MikrotikController::class, "dashboard"])
+        ->name("mikrotik.dashboard");
+
+    Route::get("/mikrotik/{mikrotik}/monitor", [\App\Http\Controllers\MikrotikController::class, "monitor"])
+        ->name("mikrotik.monitor");
+
+    Route::post("/mikrotik/{mikrotik}/monitor/interface", [\App\Http\Controllers\MikrotikController::class, "addInterfaceTarget"])
+        ->name("mikrotik.monitor.addInterface");
+
+    Route::get("/mikrotik/{mikrotik}/pppoe", [\App\Http\Controllers\MikrotikController::class, "pppIndex"])
+        ->name("mikrotik.pppoe");
+
+    Route::post("/mikrotik/{mikrotik}/pppoe/add", [\App\Http\Controllers\MikrotikController::class, "pppAdd"])
+        ->name("mikrotik.pppoe.add");
+
+    Route::post("/mikrotik/{mikrotik}/pppoe/edit", [\App\Http\Controllers\MikrotikController::class, "pppEdit"])
+        ->name("mikrotik.pppoe.edit");
+
+    Route::post("/mikrotik/{mikrotik}/pppoe/delete", [\App\Http\Controllers\MikrotikController::class, "pppoeDelete"])
+        ->name("mikrotik.pppoe.delete");
+
+    Route::post("/mikrotik/{mikrotik}/vlan", [\App\Http\Controllers\MikrotikController::class, "vlanCreate"])
+        ->name("mikrotik.vlan");
+
+    Route::post("/mikrotik/{mikrotik}/bridge", [\App\Http\Controllers\MikrotikController::class, "bridgeCreate"])
+        ->name("mikrotik.bridge");
+
+    Route::get("/mikrotik/{mikrotik}/ip-static", [\App\Http\Controllers\MikrotikController::class, "ipStatic"])
+        ->name("mikrotik.ipstatic");
+
+    Route::post("/mikrotik/{mikrotik}/ip-static/add", [\App\Http\Controllers\MikrotikController::class, "ipStaticAdd"])
+        ->name("mikrotik.ipstatic.add");
+
+    Route::post("/mikrotik/{mikrotik}/ip-static/remove", [\App\Http\Controllers\MikrotikController::class, "ipStaticRemove"])
+        ->name("mikrotik.ipstatic.remove");
+
+    Route::post("/mikrotik/{mikrotik}/ip-static/record", [\App\Http\Controllers\MikrotikController::class, "ipStaticRecord"])
+        ->name("mikrotik.ipstatic.record");
+});
+/* ---- Shortcut: /mikrotik -> device terbaru ---- */
+Route::middleware(["auth"])->get("/mikrotik-latest", function () {
+    $last = \App\Models\Mikrotik::orderByDesc("id")->first();
+    return $last
+      ? redirect()->route("mikrotik.dashboard", ["mikrotik"=>$last->id])
+      : redirect()->route("mikrotik.index");
+})->name("mikrotik.latest");
+
+/* ---- Route PPPoE Profile (add) ---- */
+Route::middleware(['auth'])->post(
+  '/mikrotik/{mikrotik}/pppoe/profile/add',
+  [\App\Http\Controllers\MikrotikController::class, 'pppProfileAdd']
+)->name('mikrotik.pppoe.profile.add');
+
+/* PPPoE: toggle record traffic */
+Route::middleware(['auth'])->post(
+  '/mikrotik/{mikrotik}/pppoe/record',
+  [\App\Http\Controllers\MikrotikController::class, 'pppRecord']
+)->name('mikrotik.pppoe.record');
+
+/* === Fallback monitor Mikrotik tanpa permission (auth saja) === */
+use App\Http\Controllers\MikrotikController;
+Route::middleware(['auth'])->post('/mkmon/{mikrotik}', [MikrotikController::class, 'monitor'])->name('mkmon');
+
+/* === MONX fallback: direct RouterOS client === */
+use Illuminate\Http\Request;
+use App\Models\Mikrotik;
+use RouterOS\Client;
+use RouterOS\Query;
+
+Route::middleware(['auth'])->post('/monx/{id}', function($id, Request $r){
+    $m = Mikrotik::findOrFail($id);
+    $iface = $r->input('iface');
+    try{
+        $c = new Client([
+            'host'=>$m->host, 'user'=>$m->username, 'pass'=>$m->password,
+            'port'=>$m->port ?: 8728, 'timeout'=>5, 'attempts'=>1
+        ]);
+        $q = (new Query('/interface/monitor-traffic'))
+                ->equal('interface',$iface)->equal('once','true');
+        $res = $c->query($q)->read();
+        $rx = (int)($res[0]['rx-bits-per-second'] ?? 0);
+        $tx = (int)($res[0]['tx-bits-per-second'] ?? 0);
+        return response()->json(['rx'=>$rx,'tx'=>$tx]);
+    }catch(\Throwable $e){
+        \Log::error('MONX fail: '.$e->getMessage());
+        return response()->json(['rx'=>0,'tx'=>0,'err'=>$e->getMessage()],500);
+    }
+})->name('monx');

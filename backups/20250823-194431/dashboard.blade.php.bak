@@ -1,0 +1,100 @@
+@extends('layouts.app')
+
+@section('content')
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex gap-2">
+    <a href="{{ route('mikrotik.index') }}" class="btn btn-secondary">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="btn btn-primary">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="btn btn-secondary">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic',$mikrotik) }}" class="btn btn-secondary">IP Static</a>
+  </div>
+
+  <div class="card bg-slate-900/60 border border-slate-800">
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="block text-sm mb-1">Interface</label>
+        <div class="flex gap-2">
+          <select id="iface" class="form-select max-w-md">
+            @foreach($if as $row)
+              @php $name=$row['name']??''; $type=$row['type']??''; @endphp
+              <option value="{{ $name }}">{{ $name }} {{ $type ? '(' . $type . ')' : '' }}</option>
+            @endforeach
+          </select>
+          <button id="btnSee" class="btn btn-primary">LIHAT</button>
+        </div>
+        <div id="mk-note" class="text-rose-300 text-sm mt-2"></div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <div class="text-slate-400 text-sm">RX</div>
+          <div class="text-2xl font-bold" id="rxNum">0 bps</div>
+          <progress id="rxBar" max="10000000000" value="0" class="w-full"></progress>
+        </div>
+        <div>
+          <div class="text-slate-400 text-sm">TX</div>
+          <div class="text-2xl font-bold" id="txNum">0 bps</div>
+          <progress id="txBar" max="10000000000" value="0" class="w-full"></progress>
+        </div>
+      </div>
+
+      <div class="mt-2 text-xs text-slate-400">Polling tiap 2 detik setelah klik LIHAT.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  if (window.__mkmon_patched) return;
+  window.__mkmon_patched = true;
+
+  const btn=document.getElementById("btnSee");
+  if(!btn) return;
+
+  // pastikan tidak ada listener lama
+  const parent=btn.parentNode; const clone=btn.cloneNode(true); parent.replaceChild(clone, btn);
+  const sel=document.getElementById("iface");
+  const rxNum=document.getElementById("rxNum"), txNum=document.getElementById("txNum");
+  const rxBar=document.getElementById("rxBar"), txBar=document.getElementById("txBar");
+  const note=document.getElementById("mk-note");
+
+  const urlPrimary = "{{ route('mikrotik.monitor',['mikrotik'=>$mikrotik->id]) }}";
+  const urlFallback = "{{ url('/mkmon/'.$mikrotik->id) }}";
+  const token = "{{ csrf_token() }}";
+
+  function say(m){ if(note) note.textContent = m || ""; }
+  function fmt(n){
+    const u=["bps","Kbps","Mbps","Gbps"]; let i=0,x=Number(n||0);
+    while(x>=1000 && i<u.length-1){ x/=1000; i++; }
+    return x.toFixed(2)+" "+u[i];
+  }
+  async function hit(url,iface){
+    return fetch(url,{
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "X-CSRF-TOKEN": token },
+      body: JSON.stringify({ iface })
+    });
+  }
+
+  let timer=null;
+  clone.addEventListener("click", async ()=>{
+    if(timer){ clearInterval(timer); timer=null; }
+    const iface = sel && sel.value;
+    if(!iface){ say("Pilih interface dulu"); return; }
+    say("");
+
+    async function tick(){
+      try{
+        let r=await hit(urlPrimary,iface);
+        if(!r.ok){ r=await hit(urlFallback,iface); if(!r.ok){ say("Gagal polling ("+r.status+")"); return; } }
+        const d=await r.json();
+        const rx=Number(d.rx||0), tx=Number(d.tx||0);
+        rxNum.textContent=fmt(rx); txNum.textContent=fmt(tx);
+        rxBar.value=rx; txBar.value=tx;
+      }catch(e){ say("Gagal polling: "+(e && e.message ? e.message : e)); }
+    }
+    tick(); timer=setInterval(tick,2000);
+  });
+})();
+</script>
+@endsection

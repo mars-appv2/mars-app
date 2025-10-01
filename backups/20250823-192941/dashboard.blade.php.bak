@@ -1,0 +1,105 @@
+@extends('layouts.app')
+
+@section('content')
+<div class="space-y-6">
+  <h2 class="text-xl font-semibold">Mikrotik – Dashboard</h2>
+  @include('mikrotik._tabs')
+
+  @if(session('ok')) <div class="card" style="border-color:#16a34a;color:#b7f7c2">{{ session('ok') }}</div> @endif
+  @if(session('err')) <div class="card" style="border-color:#ef4444;color:#ef9a9a">{{ session('err') }}</div> @endif
+  @if(!empty($err))  <div class="card" style="border-color:#ef4444;color:#ef9a9a">{{ $err }}</div> @endif
+
+  <div class="card">
+    <label class="lbl">Interface</label>
+    <div class="flex gap-3 items-center">
+      <select id="iface" class="inp w-64">
+        @foreach(($if ?? []) as $i)
+          @php $n=$i['name']??''; $t=$i['type']??''; @endphp
+          @if($n!=='') <option value="{{ $n }}">{{ $n }} ({{ $t }})</option> @endif
+        @endforeach
+      </select>
+      <button class="btn" id="btnSee">LIHAT</button>
+    </div>
+    <div class="grid md:grid-cols-2 gap-6 mt-6">
+      <div><div class="lbl">RX</div><div id="rxNum" class="text-2xl font-bold">0 bps</div><progress id="rxBar" value="0" max="100000000"></progress></div>
+      <div><div class="lbl">TX</div><div id="txNum" class="text-2xl font-bold">0 bps</div><progress id="txBar" value="0" max="100000000"></progress></div>
+    </div>
+    <div class="muted mt-2">Polling tiap 2 detik setelah klik LIHAT.</div>
+  </div>
+
+  <div class="card">
+    <div class="font-semibold text-lg mb-3">Kelola Interface</div>
+    <div class="grid md:grid-cols-2 gap-6">
+      <div>
+        <div class="font-semibold mb-2">Buat VLAN</div>
+        <form method="POST" action="{{ route('mikrotik.vlan',['mikrotik'=>$mikrotik->id]) }}">
+          @csrf
+          <label class="lbl">Nama VLAN</label>
+          <input name="name" class="inp w-64" placeholder="mis: vlan10" required>
+          <label class="lbl mt-3">Master / Parent Interface</label>
+          <select name="interface" class="inp w-64" required>
+            @foreach(($if ?? []) as $i)
+              @php $n=$i['name']??''; $t=$i['type']??''; @endphp
+              @if($n!=='') <option value="{{ $n }}">{{ $n }} ({{ $t }})</option> @endif
+            @endforeach
+          </select>
+          <label class="lbl mt-3">VLAN ID</label>
+          <input type="number" min="1" max="4094" name="vid" class="inp w-40" required>
+          <div class="mt-3"><button class="btn">SIMPAN</button></div>
+        </form>
+      </div>
+      <div>
+        <div class="font-semibold mb-2">Buat Bridge & Port</div>
+        <form method="POST" action="{{ route('mikrotik.bridge',['mikrotik'=>$mikrotik->id]) }}">
+          @csrf
+          <label class="lbl">Nama Bridge</label>
+          <input name="bridge" class="inp w-64" placeholder="mis: br-local" required>
+          <label class="lbl mt-3">Tambahkan Port (opsional)</label>
+          <select name="iface" class="inp w-64">
+            <option value="">— pilih interface —</option>
+            @foreach(($if ?? []) as $i)
+              @php $n=$i['name']??''; $t=$i['type']??''; @endphp
+              @if($n!=='') <option value="{{ $n }}">{{ $n }} ({{ $t }})</option> @endif
+            @endforeach
+          </select>
+          <div class="mt-3"><button class="btn">SIMPAN</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .card{background:#0f1428;border:1px solid #1e2a4a;border-radius:14px;padding:16px}
+  .btn{background:#4da3ff;color:#001a33;padding:.5rem .9rem;border-radius:.6rem;border:0;font-weight:600}
+  .inp{background:#0b1020;border:1px solid #243154;border-radius:.6rem;color:#e8eefc;padding:.55rem .6rem}
+  .w-40{min-width:10rem;max-width:10rem}
+  .w-64{min-width:16rem;max-width:16rem}
+  progress{width:100%;height:10px;background:#0b1020}
+  .lbl{display:block;color:#9fb3d9;font-size:.9rem;margin:.3rem 0}
+  .muted{color:#9fb3d9}
+</style>
+
+<script>
+(function(){
+  const btn=document.getElementById('btnSee'), sel=document.getElementById('iface');
+  const rxNum=document.getElementById('rxNum'), txNum=document.getElementById('txNum');
+  const rxBar=document.getElementById('rxBar'), txBar=document.getElementById('txBar');
+  let timer=null;
+  function fmt(n){const u=['bps','Kbps','Mbps','Gbps'];let i=0,x=n;while(x>=1000&&i<u.length-1){x/=1000;i++;}return x.toFixed(2)+' '+u[i];}
+  btn.addEventListener('click', ()=>{
+    if(timer){clearInterval(timer);timer=null;}
+    const iface=sel.value; if(!iface) return;
+    const url="{{ route('mikrotik.monitor',['mikrotik'=>$mikrotik->id]) }}";
+    async function tick(){
+      try{
+        const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'},body:JSON.stringify({iface})});
+        if(!r.ok) return; const d=await r.json(); const rx=Number(d.rx||0), tx=Number(d.tx||0);
+        rxNum.textContent=fmt(rx); txNum.textContent=fmt(tx); rxBar.value=rx; txBar.value=tx;
+      }catch(e){}
+    }
+    tick(); timer=setInterval(tick,2000);
+  });
+})();
+</script>
+@endsection

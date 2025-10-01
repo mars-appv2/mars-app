@@ -1,0 +1,199 @@
+<?php
+namespace App\Services;
+
+use App\Models\Mikrotik;
+use RouterOS\Client;
+use RouterOS\Exceptions\ClientException;
+
+class RouterOSService
+{
+    protected Mikrotik $dev;
+    protected Client $client;
+
+    public function __construct(Mikrotik $mikrotik)
+    {
+        $this->dev = $mikrotik;
+        $this->client = $this->makeClient($mikrotik);
+    }
+
+    protected function makeClient(Mikrotik $m): Client
+    {
+        $cfg = [
+            'host'     => $m->host,
+            'user'     => $m->username,
+            'pass'     => $m->password,      // PASTI plaintext dari DB (JANGAN di-hash)
+            'port'     => $m->port ?: 8728,  // pakai port dari DB
+            'timeout'  => 5,
+            'attempts' => 1,
+        ];
+        // Log ringan untuk verifikasi (tidak log password)
+        if (class_exists('\Log')) {
+            \Log::info('ROS connect SVC', [
+                'host'=>$cfg['host'], 'port'=>$cfg['port'],
+                'user'=>$cfg['user'], 'pwd_len'=>strlen((string)$cfg['pass']),
+            ]);
+        }
+        try {
+            return new Client($cfg);
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    protected function friendly(\Throwable $e): string
+    {
+        $msg = $e->getMessage();
+        if (stripos($msg, 'user name or password') !== false
+            || stripos($msg, 'login failed') !== false) {
+            return 'Invalid username or password supplied.';
+        }
+        return $msg ?: 'RouterOS error';
+    }
+
+    /* ----------------- Interface ----------------- */
+    public function interfaces(): array
+    {
+        try {
+            return $this->client->query('/interface/print')->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    public function monitorInterface(string $name): array
+    {
+        try {
+            return $this->client->query('/interface/monitor-traffic', [
+                'interface' => $name,
+                'once'      => 'true',
+            ])->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    public function addVlan(string $name, string $iface, int $vid): void
+    {
+        try {
+            $this->client->query('/interface/vlan/add', [
+                'name'      => $name,
+                'interface' => $iface,
+                'vlan-id'   => $vid,
+            ])->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    public function addBridge(string $bridge): void
+    {
+        try {
+            $this->client->query('/interface/bridge/add', ['name'=>$bridge])->read();
+        } catch (\Throwable $e) {
+            // Jika sudah ada, abaikan error "already have interface..."
+            if (stripos($e->getMessage(), 'already') === false) {
+                throw new \RuntimeException($this->friendly($e), previous: $e);
+            }
+        }
+    }
+
+    public function addBridgePort(string $bridge, string $iface): void
+    {
+        try {
+            $this->client->query('/interface/bridge/port/add', [
+                'bridge'    => $bridge,
+                'interface' => $iface,
+            ])->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    /* ----------------- PPPoE ----------------- */
+    protected function findId(string $path, array $where): ?string
+    {
+        $res = $this->client->query($path.'/print', $where)->read();
+        return isset($res[0]['.id']) ? $res[0]['.id'] : null;
+    }
+
+    public function pppSecrets(): array
+    {
+        try {
+            return $this->client->query('/ppp/secret/print')->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    public function pppActive(): array
+    {
+        try {
+            return $this->client->query('/ppp/active/print')->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    public function pppAdd(string $name, string $password, string $profile='default'): void
+    {
+        try {
+            $this->client->query('/ppp/secret/add', [
+                'name'     => $name,
+                'password' => $password,
+                'profile'  => $profile,
+            ])->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    public function pppSet(string $name, array $attrs): void
+    {
+        try {
+            $id = $this->findId('/ppp/secret', ['?name'=>$name]);
+            if (!$id) throw new \RuntimeException('Secret not found: '.$name);
+            $params = array_merge(['.id'=>$id], $attrs);
+            $this->client->query('/ppp/secret/set', $params)->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    public function pppRemove(string $name): void
+    {
+        try {
+            $id = $this->findId('/ppp/secret', ['?name'=>$name]);
+            if ($id) {
+                $this->client->query('/ppp/secret/remove', ['.id'=>$id])->read();
+            }
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    /* ----------------- IP Static (Address-List) ----------------- */
+    public function addToAddressList(string $list, string $ip, string $comment=''): void
+    {
+        try {
+            $this->client->query('/ip/firewall/address-list/add', [
+                'list'    => $list,
+                'address' => $ip,
+                'comment' => $comment,
+            ])->read();
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+
+    public function removeFromAddressList(string $list, string $ip): void
+    {
+        try {
+            $id = $this->findId('/ip/firewall/address-list', ['?list'=>$list, '?address'=>$ip]);
+            if ($id) {
+                $this->client->query('/ip/firewall/address-list/remove', ['.id'=>$id])->read();
+            }
+        } catch (\Throwable $e) {
+            throw new \RuntimeException($this->friendly($e), previous: $e);
+        }
+    }
+}

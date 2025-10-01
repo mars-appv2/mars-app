@@ -1,0 +1,118 @@
+@extends('layouts.app')
+
+@section('content')
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex gap-2">
+    <a href="{{ route('mikrotik.index') }}" class="btn btn-secondary">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="btn btn-secondary">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="btn btn-primary">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic',$mikrotik) }}" class="btn btn-secondary">IP Static</a>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Tambah Client -->
+    <div class="card bg-slate-900/60 border border-slate-800">
+      <div class="card-header font-semibold">Tambah Client</div>
+      <div class="card-body space-y-3">
+        <form method="POST" action="{{ route('mikrotik.pppoe.add',$mikrotik) }}">
+          @csrf
+          <div>
+            <label class="block text-sm mb-1">Username</label>
+            <input type="text" name="name" class="form-input w-full" required>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Password</label>
+            <input type="text" name="password" class="form-input w-full" required>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Profil</label>
+            <select name="profile" class="form-select w-full">
+              <option value="default">default</option>
+              @foreach(($profiles ?? []) as $p)
+                <option value="{{ $p }}">{{ $p }}</option>
+              @endforeach
+            </select>
+          </div>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input type="checkbox" name="record" value="1" class="form-checkbox">
+            Rekam trafik client ini
+          </label>
+          <div class="pt-2">
+            <button class="btn btn-primary">SIMPAN</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Tambah Profil -->
+    <div class="card bg-slate-900/60 border border-slate-800">
+      <div class="card-header font-semibold">Tambah Profil</div>
+      <div class="card-body space-y-3">
+        <form method="POST" action="{{ route('mikrotik.pppoe.profileAdd',$mikrotik) }}">
+          @csrf
+          <div>
+            <label class="block text-sm mb-1">Nama Profil</label>
+            <input type="text" name="name" class="form-input w-full" placeholder="mis: 10M" required>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Rate-limit (up/down)</label>
+            <input type="text" name="rate" class="form-input w-full" placeholder="10M/10M" required>
+          </div>
+          <div>
+            <label class="block text-sm mb-1">Parent Queue (opsional)</label>
+            <input type="text" name="parent" class="form-input w-full" placeholder="mis: global">
+          </div>
+          <div class="pt-2">
+            <button class="btn btn-primary">SIMPAN</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Daftar Secret / Active (opsional, tampil kalau tersedia) -->
+  @if(!empty($secrets) || !empty($active))
+  <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="card">
+      <div class="card-header font-semibold">Secrets</div>
+      <div class="card-body overflow-x-auto">
+        <table class="table w-full">
+          <thead><tr><th>User</th><th>Profile</th><th>Status</th></tr></thead>
+          <tbody>
+          @forelse($secrets ?? [] as $s)
+            <tr>
+              <td>{{ $s['name'] ?? '' }}</td>
+              <td>{{ $s['profile'] ?? '' }}</td>
+              <td>{{ !empty($s['disabled']) && $s['disabled']=='true' ? 'Disabled' : 'Enabled' }}</td>
+            </tr>
+          @empty
+            <tr><td colspan="3" class="text-center text-slate-400">No data</td></tr>
+          @endforelse
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header font-semibold">Active</div>
+      <div class="card-body overflow-x-auto">
+        <table class="table w-full">
+          <thead><tr><th>User</th><th>Address</th><th>Uptime</th></tr></thead>
+          <tbody>
+          @forelse($active ?? [] as $a)
+            <tr>
+              <td>{{ $a['name'] ?? '' }}</td>
+              <td>{{ $a['address'] ?? '' }}</td>
+              <td>{{ $a['uptime'] ?? '' }}</td>
+            </tr>
+          @empty
+            <tr><td colspan="3" class="text-center text-slate-400">No data</td></tr>
+          @endforelse
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  @endif
+
+</div>
+@endsection

@@ -1,0 +1,24 @@
+return new class extends Migration {
+    public function up(): void
+    {
+        if (!Schema::hasColumn('mikrotiks','team_id')) {
+            Schema::table('mikrotiks', function (Blueprint $table) {
+                $table->unsignedBigInteger('team_id')->nullable()->index()->after('id');
+            });
+        }
+        if (!Schema::hasColumn('users','team_id')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->unsignedBigInteger('team_id')->nullable()->index()->after('id');
+            });
+        }
+    }
+    public function down(): void
+    {
+        if (Schema::hasColumn('mikrotiks','team_id')) {
+            Schema::table('mikrotiks', fn(Blueprint $t) => $t->dropColumn('team_id'));
+        }
+        if (Schema::hasColumn('users','team_id')) {
+            Schema::table('users', fn(Blueprint $t) => $t->dropColumn('team_id'));
+        }
+    }
+};

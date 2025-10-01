@@ -1,0 +1,55 @@
+/* === Audit Log Dark Neon Contrast === */
+:root {
+  --bg-900:#0c0f1a;      /* latar utama */
+  --bg-800:#121624;      /* panel */
+  --bg-700:#1a1f33;      /* header tabel */
+  --line:#2a2f45;        /* garis */
+  --fg:#e6e9f2;          /* teks utama */
+  --fg-dim:#b5bdd3;      /* teks sekunder */
+  --fg-mute:#8c93a8;     /* placeholder/subtext */
+  --link:#6ea8ff;
+  --ok:#19c37d;
+  --warn:#f6c453;
+  --err:#ff6b6b;
+}
+
+.audit-scope { color: var(--fg); }
+.audit-scope .card,
+.audit-scope .panel { background: var(--bg-800); border:1px solid var(--line); border-radius:12px; }
+
+.audit-scope .filters input,
+.audit-scope .filters select {
+  background: var(--bg-900);
+  color: var(--fg);
+  border:1px solid var(--line);
+  outline: none;
+}
+.audit-scope .filters input::placeholder { color: var(--fg-mute); }
+
+.audit-table { width:100%; border-collapse: separate; border-spacing:0; }
+.audit-table thead th {
+  background: var(--bg-700);
+  color: var(--fg-dim);
+  font-weight:600;
+  padding:12px 14px;
+  border-bottom:1px solid var(--line);
+}
+.audit-table tbody td {
+  padding:12px 14px;
+  border-bottom:1px solid var(--line);
+  vertical-align: top;
+}
+.audit-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+
+.audit-subtext { display:block; color: var(--fg-mute); font-size:.85rem; margin-top:2px; }
+.audit-action { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.badge { padding:2px 8px; border-radius:999px; font-size:.75rem; font-weight:700; letter-spacing:.3px; }
+.badge-ok    { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); border:1px solid color-mix(in srgb, var(--ok) 50%, transparent); }
+.badge-warn  { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); border:1px solid color-mix(in srgb, var(--warn) 50%, transparent); }
+.badge-err   { background: color-mix(in srgb, var(--err) 20%, transparent); color: var(--err); border:1px solid color-mix(in srgb, var(--err) 50%, transparent); }
+
+.audit-link { color: var(--link); text-decoration: none; }
+.audit-link:hover { text-decoration: underline; }
+
+.audit-kv { color: var(--fg-mute); font-size:.8rem; }

@@ -1,0 +1,93 @@
+@extends('layouts.app')
+@section('content')
+<?= $DARK_CSS ?? '' ?>
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex gap-2 items-center">
+    <a href="{{ route('mikrotik.index') }}" class="btn">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="btn btn-primary">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="btn">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic',$mikrotik) }}" class="btn">IP Static</a>
+    <span class="badge">hotfix-v5</span>
+  </div>
+
+  <div class="card">
+    <div class="card-body space-y-4">
+      <div>
+        <label class="block small mb-1">Pilih interface untuk dimonitor</label>
+        <div class="flex flex-wrap items-center gap-2">
+          <select id="iface" class="form-select min-w-[280px]">
+            <option value="" disabled selected>— pilih interface —</option>
+            @foreach($if as $row)
+              @php $name=$row['name']??''; $type=$row['type']??''; @endphp
+              <option value="{{ $name }}">{{ $name }} {{ $type? '(' . $type . ')' : '' }}</option>
+            @endforeach
+          </select>
+          <button id="btnAdd" class="btn">Tambah</button>
+          <button id="btnStart" class="btn btn-primary">Mulai</button>
+          <button id="btnStop"  class="btn btn-outline">Stop</button>
+        </div>
+        <div id="mk-note" class="small mt-2" style="color:#fca5a5"></div>
+      </div>
+
+      <div id="chips" class="flex flex-wrap gap-2"></div>
+      <div id="cards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      <div class="small">Polling tiap 2 detik setelah klik <b>Mulai</b>.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  if(window.__mkmon_v5) return; window.__mkmon_v5=true;
+  const tok='{{ csrf_token() }}';
+  const urlG='{{ route('mikrotik.monitor',['mikrotik'=>$mikrotik->id]) }}';
+  const urlP='{{ url('/mkmon/'.$mikrotik->id) }}';
+  const urlX='{{ url('/monx/'.$mikrotik->id) }}';
+
+  const sel=document.getElementById('iface');
+  const chips=document.getElementById('chips');
+  const cards=document.getElementById('cards');
+  const note=document.getElementById('mk-note');
+  const btnAdd=document.getElementById('btnAdd');
+  const btnStart=document.getElementById('btnStart');
+  const btnStop=document.getElementById('btnStop');
+
+  const list=new Set(); let timer=null;
+  const fmt=n=>{const u=['bps','Kbps','Mbps','Gbps'];let i=0,x=Number(n||0);while(x>=1000&&i<u.length-1){x/=1000;i++;}return x.toFixed(2)+' '+u[i];}
+  const say=m=>{note.textContent=m||'';}
+
+  const mkCard=(iface)=>{const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_');const d=document.createElement('div');
+    d.className='p-4 rounded-lg bg-slate-900/70 border border-slate-800';
+    d.innerHTML=`
+      <div class="small mb-1">${iface}</div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><div class="small">RX</div><div id="rxN_${id}" class="text-xl font-semibold">0 bps</div><progress id="rxB_${id}" max="10000000000" value="0" class="w-full"></progress></div>
+        <div><div class="small">TX</div><div id="txN_${id}" class="text-xl font-semibold">0 bps</div><progress id="txB_${id}" max="10000000000" value="0" class="w-full"></progress></div>
+      </div>`;return d;
+  }
+  const ensureCard=(iface)=>{const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_');if(!document.getElementById('rxN_'+id)){cards.appendChild(mkCard(iface));}}
+  const renderChips=()=>{chips.innerHTML='';[...list].forEach(iface=>{const s=document.createElement('span');
+    s.className='kpill dim'; s.innerHTML=`${iface} <button class="small" title="hapus" style="color:#fca5a5">&times;</button>`;
+    s.querySelector('button').onclick=()=>{list.delete(iface);const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_');const n=document.getElementById('rxN_'+id); if(n) n.closest('div.p-4').remove(); renderChips();};
+    chips.appendChild(s);});
+  }
+  btnAdd.onclick=()=>{const v=sel && sel.value; if(!v){say('Pilih interface dulu');return;} list.add(v); ensureCard(v); renderChips(); say('');}
+  btnStart.onclick=()=>{ if(timer){clearInterval(timer);} if(list.size===0){say('Tambah minimal 1 interface');return;}
+    async function one(ifx){
+      try{
+        let r=await fetch(urlG+'?iface='+encodeURIComponent(ifx),{method:'GET'});
+        if(!r.ok){ r=await fetch(urlP,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':tok},body:JSON.stringify({iface:ifx})}); }
+        if(!r.ok){ r=await fetch(urlX,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':tok},body:JSON.stringify({iface:ifx})}); }
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const d=await r.json(); const id=ifx.replace(/[^a-zA-Z0-9_-]/g,'_'); const rx=+d.rx||0, tx=+d.tx||0;
+        const rxN=document.getElementById('rxN_'+id), txN=document.getElementById('txN_'+id);
+        const rxB=document.getElementById('rxB_'+id), txB=document.getElementById('txB_'+id);
+        if(rxN) rxN.textContent=fmt(rx); if(txN) txN.textContent=fmt(tx); if(rxB) rxB.value=rx; if(txB) txB.value=tx;
+      }catch(e){}
+    }
+    const tick=()=>Promise.all([...list].map(one)); tick(); timer=setInterval(tick,2000); say('');
+  }
+  btnStop.onclick=()=>{ if(timer){clearInterval(timer); timer=null;} }
+})();
+</script>
+@endsection

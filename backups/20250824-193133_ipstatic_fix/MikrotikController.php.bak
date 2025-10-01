@@ -1,0 +1,227 @@
+<?php
+namespace App\Http\Controllers;
+
+use App\Models\Mikrotik;
+use App\Models\MonitorTarget;
+use App\Services\RouterOSService;
+use Illuminate\Http\Request;
+
+class MikrotikController extends Controller
+{
+    public function index(){
+        $list = Mikrotik::orderBy('id','desc')->get();
+        return view('mikrotik.index', compact('list'));
+    }
+
+    public function store(Request $r){
+        $d=$r->validate([
+            'name'=>'required','host'=>'required',
+            'port'=>'nullable|integer','username'=>'required','password'=>'required',
+        ]);
+        $d['port']=$d['port']?:8728;
+        Mikrotik::create($d);
+        return back()->with('ok','Saved');
+    }
+
+    public function delete(Mikrotik $mikrotik){
+        $mikrotik->delete();
+        return back()->with('ok','Deleted');
+    }
+
+    public function dashboard(Mikrotik $mikrotik){
+        try { $ros=new RouterOSService($mikrotik); $if=$ros->interfaces(); $err=null; }
+        catch(\Throwable $e){ $if=[]; $err=$e->getMessage(); }
+        return view('mikrotik.dashboard', compact('mikrotik','if','err'));
+    }
+
+    public function monitor(Mikrotik $mikrotik, Request $r){
+        $r->validate(['iface'=>'required']);
+        $ros=new RouterOSService($mikrotik);
+        return response()->json($ros->monitorInterface($r->iface));
+    }
+
+    public function vlanCreate(Mikrotik $mikrotik, Request $r){
+        $d=$r->validate(['name'=>'required','interface'=>'required','vid'=>'required|integer|min:1|max:4094']);
+        try{
+            (new RouterOSService($mikrotik))->addVlan($d['name'],$d['interface'],$d['vid']);
+            return back()->with('ok','VLAN created');
+        }catch(\Throwable $e){
+            return back()->with('err','Gagal buat VLAN: '.$e->getMessage());
+        }
+    }
+
+    public function bridgeCreate(Mikrotik $mikrotik, Request $r){
+        $d=$r->validate(['bridge'=>'required','iface'=>'nullable']);
+        try{
+            $svc=new RouterOSService($mikrotik);
+            $svc->addBridge($d['bridge']);
+            if(!empty($d['iface'])) $svc->addBridgePort($d['bridge'],$d['iface']);
+            return back()->with('ok','Bridge/Port created');
+        }catch(\Throwable $e){
+            return back()->with('err','Gagal buat Bridge/Port: '.$e->getMessage());
+        }
+    }
+
+    /* ===== PPPoE ===== */
+    public function pppIndex(Mikrotik $mikrotik, Request $r){
+        $profiles = $profiles ?? [];
+        $svc      = new RouterOSService($mikrotik);
+        $secrets  = $svc->pppSecrets();
+        $active   = $svc->pppActive();
+        $profiles = [];/* fallback: ambil dari $secrets di view */
+
+        $recs = MonitorTarget::where(['mikrotik_id'=>$mikrotik->id,'target_type'=>'pppoe'])->get();
+        $recMap = [];
+        foreach ($recs as $mt) $recMap[$mt->target_key] = (bool)$mt->enabled;
+
+        $q = trim((string)$r->query('q',''));
+        if ($q !== '') {
+            $qq = mb_strtolower($q);
+            $secrets = array_values(array_filter($secrets, function($s) use($qq){
+                $name = mb_strtolower($s['name'] ?? '');
+                $comment = mb_strtolower($s['comment'] ?? '');
+                $addr = mb_strtolower($s['remote-address'] ?? $s['address'] ?? '');
+                return strpos($name,$qq)!==false || strpos($comment,$qq)!==false || strpos($addr,$qq)!==false;
+            }));
+            $active = array_values(array_filter($active, function($a) use($qq){
+                $name = mb_strtolower($a['name'] ?? '');
+                $addr = mb_strtolower($a['address'] ?? '');
+                return strpos($name,$qq)!==false || strpos($addr,$qq)!==false;
+            }));
+        }
+
+        return view('mikrotik.pppoe', compact('mikrotik','secrets','active','profiles','q','recMap'));
+    }
+
+    /**
+     * Route mikrotik.pppoe.add:
+     *  - mode=client (default): tambah PPP secret
+     *  - mode=profile        : tambah PPP profile
+     */
+    public function pppAdd(Mikrotik $mikrotik, Request $r){
+        $mode = $r->input('mode','client');
+        try{
+            $svc = new RouterOSService($mikrotik);
+            if ($mode === 'profile') {
+                $d=$r->validate(['pname'=>'required','rate'=>'required','parent'=>'nullable']);
+                $svc->pppProfileAdd($d['pname'],$d['rate'],$d['parent']??null);
+                return back()->with('ok','Profil PPPoE ditambahkan');
+            } else {
+                $d=$r->validate(['name'=>'required','password'=>'required','profile'=>'nullable','record'=>'nullable']);
+                $svc->pppAdd($d['name'],$d['password'],$d['profile']?:'default');
+                if($r->has('record')){
+                    MonitorTarget::firstOrCreate(
+                        ['mikrotik_id'=>$mikrotik->id,'target_type'=>'pppoe','target_key'=>$d['name']],
+                        ['label'=>$d['name'],'enabled'=>true]
+                    );
+                }
+                return back()->with('ok','PPPoE added');
+            }
+        }catch(\Throwable $e){
+            return back()->with('err','Gagal simpan: '.$e->getMessage())->withInput();
+        }
+    }
+
+    /** Route mikrotik.pppoe.edit (ubah profil/password, enable/disable, toggle rekam) */
+    public function pppEdit(Mikrotik $mikrotik, Request $r){
+        $d=$r->validate(['name'=>'required','password'=>'nullable','profile'=>'nullable','action'=>'nullable','record'=>'nullable']);
+        try{
+            $svc = new RouterOSService($mikrotik);
+            $attrs = [];
+            if(strlen((string)($d['password']??''))) $attrs['password'] = $d['password'];
+            if(strlen((string)($d['profile']??'')))  $attrs['profile']  = $d['profile'];
+            $act = $r->input('action');
+            if($act === 'disable')      $attrs['disabled'] = 'yes';
+            else if($act === 'enable')  $attrs['disabled'] = 'no';
+            if (!empty($attrs)) $svc->pppSet($d['name'], $attrs);
+
+            // toggle rekam trafik
+            $mt=MonitorTarget::where(['mikrotik_id'=>$mikrotik->id,'target_type'=>'pppoe','target_key'=>$d['name']])->first();
+            if($r->has('record')){
+                if(!$mt) MonitorTarget::create(['mikrotik_id'=>$mikrotik->id,'target_type'=>'pppoe','target_key'=>$d['name'],'label'=>$d['name'],'enabled'=>true]);
+                else $mt->update(['enabled'=>true]);
+            } else {
+                if($mt) $mt->update(['enabled'=>false]);
+            }
+
+            return back()->with('ok','PPPoE updated');
+        }catch(\Throwable $e){
+            return back()->with('err','Update PPPoE gagal: '.$e->getMessage());
+        }
+    }
+
+    public function pppoeDelete(Mikrotik $mikrotik, Request $r){
+        $r->validate(['name'=>'required']);
+        try{
+            (new RouterOSService($mikrotik))->pppRemove($r->name);
+            MonitorTarget::where(['mikrotik_id'=>$mikrotik->id,'target_type'=>'pppoe','target_key'=>$r->name])->delete();
+            return back()->with('ok','Deleted');
+        }catch(\Throwable $e){
+            return back()->with('err','Hapus gagal: '.$e->getMessage());
+        }
+    }
+
+    /* ===== IP Static ===== */
+    public function ipStatic(Mikrotik $mikrotik){ return view('mikrotik.ipstatic', compact('mikrotik')); }
+    public function ipStaticAdd(Mikrotik $mikrotik, Request $r){
+        $d=$r->validate(['ip'=>'required','list'=>'nullable','comment'=>'nullable']);
+        try{
+            (new RouterOSService($mikrotik))->addToAddressList($d['list']?:'static',$d['ip'],$d['comment']?:'');
+            return back()->with('ok','IP added');
+        }catch(\Throwable $e){
+            return back()->with('err','Tambah IP gagal: '.$e->getMessage());
+        }
+    }
+    public function ipStaticRemove(Mikrotik $mikrotik, Request $r){
+        $d=$r->validate(['ip'=>'required','list'=>'nullable']);
+        try{
+            (new RouterOSService($mikrotik))->removeFromAddressList($d['list']?:'static',$d['ip']);
+            MonitorTarget::where(['mikrotik_id'=>$mikrotik->id,'target_type'=>'ip','target_key'=>$d['ip']])->delete();
+            return back()->with('ok','IP removed');
+        }catch(\Throwable $e){
+            return back()->with('err','Hapus IP gagal: '.$e->getMessage());
+        }
+    }
+    public function ipStaticRecord(Mikrotik $mikrotik, Request $r){
+        $d=$r->validate(['ip'=>'required','enable'=>'nullable']);
+        if($r->has('enable')){
+            MonitorTarget::firstOrCreate(
+                ['mikrotik_id'=>$mikrotik->id,'target_type'=>'ip','target_key'=>$d['ip']],
+                ['label'=>$d['ip'],'enabled'=>true]
+            );
+        } else {
+            MonitorTarget::where(['mikrotik_id'=>$mikrotik->id,'target_type'=>'ip','target_key'=>$d['ip']])->update(['enabled'=>false]);
+        }
+        return back()->with('ok','Recording updated');
+    }
+
+    public function addInterfaceTarget(Mikrotik $mikrotik, Request $r){
+        $d=$r->validate(['iface'=>'required','label'=>'nullable']);
+        MonitorTarget::firstOrCreate(
+            ['mikrotik_id'=>$mikrotik->id,'target_type'=>'interface','target_key'=>$d['iface']],
+            ['label'=>$d['label']?:$d['iface'],'enabled'=>true]
+        );
+        return back()->with('ok','Monitor target added');
+    }
+    public function pppRecord(\App\Models\Mikrotik $mikrotik, \Illuminate\Http\Request $r){
+        $d = $r->validate(["name"=>"required","enable"=>"nullable","label"=>"nullable"]);
+        $name = $d["name"]; $label = $d["label"] ?? $name; $on = $r->has("enable");
+        \Log::info("[ROS_UI] ppp.record.req", ["id"=>$mikrotik->id, "name"=>$name, "enable"=>$on]);
+        $mt = \App\Models\MonitorTarget::where([
+            "mikrotik_id"=>$mikrotik->id, "target_type"=>"pppoe", "target_key"=>$name
+        ])->first();
+        if ($on) {
+            if (!$mt) {
+                \App\Models\MonitorTarget::create([
+                    "mikrotik_id"=>$mikrotik->id, "target_type"=>"pppoe", "target_key"=>$name,
+                    "label"=>$label, "enabled"=>true
+                ]);
+            } else { $mt->update(["enabled"=>true, "label"=>$label]); }
+            return back()->with("ok","Recording enabled");
+        } else {
+            if ($mt) { $mt->update(["enabled"=>false]); }
+            return back()->with("ok","Recording disabled");
+        }
+    }
+
+}

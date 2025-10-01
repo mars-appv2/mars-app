@@ -1,0 +1,14 @@
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class TelegramBot extends Model
+{
+    protected $fillable = ['name','username','token','company_id','created_by','is_active','settings'];
+    protected $casts = ['settings'=>'array','is_active'=>'boolean'];
+
+    public function subscribers()
+    {
+        return $this->hasMany(TelegramSubscriber::class,'bot_id');
+    }
+}

@@ -1,0 +1,19 @@
+[0;1;32m●[0m php7.4-fpm.service - The PHP 7.4 FastCGI Process Manager
+     Loaded: loaded (/lib/systemd/system/php7.4-fpm.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Mon 2025-09-08 02:14:12 WIB; 15min ago
+       Docs: man:php-fpm7.4(8)
+    Process: 2923729 ExecStartPost=/usr/lib/php/php-fpm-socket-helper install /run/php/php-fpm.sock /etc/php/7.4/fpm/pool.d/www.conf 74 (code=exited, status=0/SUCCESS)
+    Process: 2926799 ExecReload=/bin/kill -USR2 $MAINPID (code=exited, status=0/SUCCESS)
+   Main PID: 2923714 (php-fpm7.4)
+     Status: "Processes active: 0, idle: 2, Requests: 0, slow: 0, Traffic: 0req/sec"
+      Tasks: 3 (limit: 18638)
+     Memory: 11.2M
+     CGroup: /system.slice/php7.4-fpm.service
+             ├─2923714 php-fpm: master process (/etc/php/7.4/fpm/php-fpm.conf)
+             ├─2926801 php-fpm: pool www
+             └─2926802 php-fpm: pool www
+
+Sep 08 02:14:12 marsradius systemd[1]: Starting The PHP 7.4 FastCGI Process Manager...
+Sep 08 02:14:12 marsradius systemd[1]: Started The PHP 7.4 FastCGI Process Manager.
+Sep 08 02:20:57 marsradius systemd[1]: Reloading The PHP 7.4 FastCGI Process Manager.
+Sep 08 02:20:57 marsradius systemd[1]: Reloaded The PHP 7.4 FastCGI Process Manager.

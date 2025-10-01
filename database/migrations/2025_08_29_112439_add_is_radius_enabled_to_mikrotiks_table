@@ -1,0 +1,13 @@
+public function up()
+{
+    Schema::table('mikrotiks', function (Blueprint $table) {
+        $table->boolean('is_radius_enabled')->default(false);
+    });
+}
+
+public function down()
+{
+    Schema::table('mikrotiks', function (Blueprint $table) {
+        $table->dropColumn('is_radius_enabled');
+    });
+}

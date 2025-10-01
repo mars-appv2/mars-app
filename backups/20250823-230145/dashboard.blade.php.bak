@@ -1,0 +1,191 @@
+@extends('layouts.app')
+@section('content')
+<style>
+.badge{font-size:.72rem;padding:.2rem .45rem;border-radius:.4rem;border:1px solid #2a3350;background:rgba(99,102,241,.15);color:#cbd5e1}
+.m-card{background:#121827;border:1px solid #2a3350;border-radius:14px}
+.m-muted{color:#95a3bf}
+.m-btn{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:10px;padding:.55rem 1rem;transition:.15s}
+.m-btn:hover{filter:brightness(1.12);transform:translateY(-1px)}
+.m-btnp{background:#3b82f6;border-color:#3b82f6}
+.m-inp,.m-sel{background:#0c101c;border:1px solid #2a3350;border-radius:10px;color:#e6eaf2;padding:.55rem .75rem}
+.m-sel{padding-right:2.2rem;appearance:none}
+.m-selwrap{position:relative}
+.m-selwrap:after{content:'▾';position:absolute;right:.65rem;top:50%;transform:translateY(-50%);color:#95a3bf}
+.small{font-size:.85rem;color:#95a3bf}
+</style>
+<div class="container mx-auto px-2 md:px-4">
+  <div class="mb-4 flex gap-2 items-center">
+    <a href="{{ route('mikrotik.index') }}" class="m-btn">Table List</a>
+    <a href="{{ route('mikrotik.dashboard',$mikrotik) }}" class="m-btn m-btnp">Dashboard</a>
+    <a href="{{ route('mikrotik.pppoe',$mikrotik) }}" class="m-btn">PPPoE</a>
+    <a href="{{ route('mikrotik.ipstatic',$mikrotik) }}" class="m-btn">IP Static</a>
+    <span class="badge">hotfix-v5.2</span>
+  </div>
+
+  <div class="m-card">
+    <div class="p-4 space-y-4">
+      <div>
+        <label class="small mb-1 block">Pilih interface untuk dimonitor</label>
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="m-selwrap min-w-[260px]">
+            <select id="iface" class="m-sel w-full">
+              <option value="" disabled selected>— pilih interface —</option>
+              @foreach($if as $row)
+                @php $name=$row['name']??''; $type=$row['type']??''; @endphp
+                <option value="{{ $name }}">{{ $name }} {{ $type? '(' . $type . ')' : '' }}</option>
+              @endforeach
+            </select>
+          </div>
+          <button id="btnAdd" class="m-btn">Tambah</button>
+          <button id="btnStart" class="m-btn m-btnp">Mulai</button>
+    <!-- ===== Monitor GROUP Toolbar (auto) ===== -->
+    <div id="mk-group-wrap" class="d-flex align-items-center gap-2 flex-wrap ms-auto mt-2" style="justify-content:flex-end;">
+      <select id="mk-group-select" class="form-select form-select-sm" style="max-width:220px"><option value="">— pilih group —</option></select>
+      <input id="mk-group-name" class="form-control form-control-sm" placeholder="Nama group (mis: uplink)" style="max-width:240px"/>
+      <button class="btn btn-sm btn-outline-primary" id="mk-group-save">Simpan/Hapus</button>
+      <button class="btn btn-sm btn-outline-secondary" id="mk-group-edit">Edit</button>
+      <button class="btn btn-sm btn-primary" id="mk-group-start">Mulai</button>
+    </div>
+    <!-- /Monitor GROUP Toolbar -->
+          <button id="btnStop"  class="m-btn">Stop</button>
+        </div>
+        <div id="mk-note" class="small mt-2" style="color:#fca5a5"></div>
+      </div>
+
+      <div id="chips" class="flex flex-wrap gap-2"></div>
+      <div id="cards" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+    <!-- Monitor GROUP Toolbar (clean v2) -->
+    <div id="mk-group-wrap" class="d-flex flex-wrap align-items-center gap-2 mt-3" style="justify-content:flex-start;">
+      <select id="mk-group-select" class="form-select form-select-sm" style="max-width:220px">
+        <option value="">— pilih group —</option>
+      </select>
+      <input id="mk-group-name" class="form-control form-control-sm" placeholder="Nama group (mis: uplink)" style="max-width:240px"/>
+      <button class="btn btn-sm btn-outline-primary" id="mk-group-save">Simpan/Hapus</button>
+      <button class="btn btn-sm btn-outline-secondary" id="mk-group-edit">Edit</button>
+      <button class="btn btn-sm btn-primary" id="mk-group-start">Mulai</button>
+    </div>
+    <!-- /Monitor GROUP Toolbar (clean v2) -->
+      <div class="small">Polling tiap 2 detik setelah klik <b>Mulai</b>.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  if(window.__mkmon_v52) return; window.__mkmon_v52=true;
+  const tok='{{ csrf_token() }}';
+  const urlG='{{ route('mikrotik.monitor',['mikrotik'=>$mikrotik->id]) }}';
+  const urlP='{{ url('/mkmon/'.$mikrotik->id) }}';
+  const urlX='{{ url('/monx/'.$mikrotik->id) }}';
+  const sel=document.getElementById('iface'), chips=document.getElementById('chips'), cards=document.getElementById('cards');
+  const note=document.getElementById('mk-note'); const btnAdd=document.getElementById('btnAdd');
+  const btnStart=document.getElementById('btnStart'); const btnStop=document.getElementById('btnStop');
+  const list=new Set(); let timer=null;
+  const fmt=n=>{const u=['bps','Kbps','Mbps','Gbps'];let i=0,x=+n||0;while(x>=1000&&i<u.length-1){x/=1000;i++;}return x.toFixed(2)+' '+u[i];}
+  const say=m=>{note.textContent=m||'';}
+  const card=(iface)=>{const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_');const d=document.createElement('div');
+    d.className='p-4 rounded-lg border border-slate-800'; d.style.background='#0f1526';
+    d.innerHTML=`<div class="small mb-1">${iface}</div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><div class="small">RX</div><div id="rxN_${id}" class="text-xl font-semibold">0 bps</div><progress id="rxB_${id}" max="10000000000" value="0" class="w-full"></progress></div>
+        <div><div class="small">TX</div><div id="txN_${id}" class="text-xl font-semibold">0 bps</div><progress id="txB_${id}" max="10000000000" value="0" class="w-full"></progress></div>
+      </div>`; return d; }
+  const ensure=(iface)=>{const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_'); if(!document.getElementById('rxN_'+id)) cards.appendChild(card(iface));}
+  const chipsRender=()=>{chips.innerHTML='';[...list].forEach(iface=>{const s=document.createElement('span');
+    s.className='px-2 py-1 border border-slate-700 rounded text-xs'; s.style.background='rgba(148,163,184,.08)'; s.style.color='#cbd5e1';
+    s.innerHTML=`${iface} <button class="text-rose-300" title="hapus">&times;</button>`;
+    s.querySelector('button').onclick=()=>{list.delete(iface); const id=iface.replace(/[^a-zA-Z0-9_-]/g,'_'); const n=document.getElementById('rxN_'+id); if(n) n.closest('div.p-4').remove(); chipsRender();};
+    chips.appendChild(s);});}
+  btnAdd.onclick=()=>{const v=sel && sel.value; if(!v){say('Pilih interface dulu');return;} list.add(v); ensure(v); chipsRender(); say('');}
+  btnStart.onclick=()=>{ if(timer){clearInterval(timer);} if(list.size===0){say('Tambah minimal 1 interface');return;}
+    async function one(ifx){
+      try{
+        let r=await fetch(urlG+'?iface='+encodeURIComponent(ifx),{method:'GET'});
+        if(!r.ok){ r=await fetch(urlP,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':tok},body:JSON.stringify({iface:ifx})});}
+        if(!r.ok){ r=await fetch(urlX,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':tok},body:JSON.stringify({iface:ifx})});}
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const d=await r.json(); const id=ifx.replace(/[^a-zA-Z0-9_-]/g,'_'); const rx=+d.rx||0, tx=+d.tx||0;
+        const rxN=document.getElementById('rxN_'+id), txN=document.getElementById('txN_'+id);
+        const rxB=document.getElementById('rxB_'+id), txB=document.getElementById('txB_'+id);
+        if(rxN) rxN.textContent=fmt(rx); if(txN) txN.textContent=fmt(tx); if(rxB) rxB.value=rx; if(txB) txB.value=tx;
+      }catch(e){}
+    }
+    const tick=()=>Promise.all([...list].map(one)); tick(); timer=setInterval(tick,2000); say('');
+  }
+  btnStop.onclick=()=>{ if(timer){clearInterval(timer); timer=null;} }
+})();
+</script>
+<!-- ===== Group JS (auto-injected) ===== -->
+<style>.mk-traffic-card{transition:box-shadow .2s}.mk-traffic-card.active{box-shadow:0 0 .75rem rgba(120,180,255,.25)}#mk-group-wrap .form-select,#mk-group-wrap .form-control,#mk-group-wrap .btn{height:34px}</style>
+<script>(function(){
+const getId=()=>{try{return {{ $mikrotik->id ?? 0 }}}catch(e){return 0}};
+const base=(fn)=>`/mikrotik/${getId()}/monitor/group${fn?fn:""}`;
+function toast(m,ok=true){if(window.toastr){ok?toastr.success(m):toastr.error(m)}else alert(m)}
+function currentIfaces(){const chips=document.querySelectorAll("[data-iface]");if(chips.length){return Array.from(chips).map(e=>e.getAttribute("data-iface")).filter(Boolean)}const s=document.querySelector("select[name=\\"iface\\"],#ifaceSelect,.iface-select,.form-select");if(s&&s.value)return[s.value];return[]}
+async function loadGroups(){try{const r=await fetch(base(""));const j=await r.json();const sel=document.getElementById("mk-group-select");if(!sel)return;sel.innerHTML="<option value=\"\">— pilih group —</option>";const g=(j&&j.groups)?j.groups:{};Object.keys(g).sort().forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=`${n} (${g[n].length})`;sel.appendChild(o)})}catch(e){console.warn(e)}}
+async function saveGroup(){const name=document.getElementById("mk-group-name").value.trim();const ifs=currentIfaces();if(!name){toast("Isi nama group",false);return}if(!ifs.length){toast("Pilih/tambah minimal 1 interface",false);return}const ok=await fetch(base("/save"),{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-TOKEN":document.querySelector("meta[name=csrf-token]")?.content||""},body:JSON.stringify({name,ifaces:ifs})});ok.ok?(toast("Group tersimpan"),loadGroups()):toast("Gagal simpan group",false)}
+async function deleteGroup(){const sel=document.getElementById("mk-group-select");const v=sel?.value||"";if(!v){toast("Pilih group dulu",false);return}if(!confirm(`Hapus group "${v}" ?`))return;const ok=await fetch(base("/delete"),{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-TOKEN":document.querySelector("meta[name=csrf-token]")?.content||""},body:JSON.stringify({name:v})});ok.ok?(toast("Group dihapus"),loadGroups()):toast("Gagal hapus group",false)}
+async function startGroup(){const sel=document.getElementById("mk-group-select");const g=sel?.value||"";if(!g){toast("Pilih group dulu",false);return}try{const r=await fetch(base(""));const j=await r.json();const all=(j&&j.groups)?j.groups:{};const list=all[g]||[];if(!list.length){toast("Group kosong",false);return}const addBtn=document.querySelector("button#btnAdd,button.add-iface,button:contains(\\"Tambah\\")");const selMain=document.querySelector("select[name=\\"iface\\"],#ifaceSelect,.iface-select,.form-select");if(addBtn&&selMain){for(const s of list){selMain.value=s;addBtn.click()}}const startBtn=document.querySelector("button#btnStart,button.start-mon,button:contains(\\"Mulai\\")");startBtn?.click()}catch(e){console.warn(e);toast("Gagal mulai group",false)}}
+document.addEventListener("DOMContentLoaded",()=>{
+document.getElementById("mk-group-save")?.addEventListener("click",saveGroup);
+document.getElementById("mk-group-start")?.addEventListener("click",startGroup);
+document.getElementById("mk-group-edit")?.addEventListener("click",()=>{const sel=document.getElementById("mk-group-select");const nm=sel?.value||"";const box=document.getElementById("mk-group-name");if(nm&&box){if(box.value.trim()===nm){(async()=>{if(!confirm(`Hapus group "${nm}" ?`))return;const ok=await fetch(base("/delete"),{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-TOKEN":document.querySelector("meta[name=csrf-token]")?.content||""},body:JSON.stringify({name:nm})});ok.ok?toast("Group dihapus"):toast("Gagal hapus",false);loadGroups()})()}else{box.value=nm;box.focus()}}});
+loadGroups()});})();</script>
+<!-- /Group JS -->
+@endsection
+
+{{-- ===== Interface Groups (tidak mengubah desain inti) ===== --}}
+<div id="mg-wrap" class="card mt-3" style="background:#0f1423;border:1px solid #1f2942;">
+  <div class="card-body">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <strong style="color:#cfe3ff">Groups</strong>
+      <select id="mg-select" class="form-control" style="min-width:220px;"></select>
+      <button id="mg-load" class="btn btn-outline-primary btn-sm">MULAI GRUP</button>
+
+      <span class="mx-3" style="opacity:.6;">|</span>
+      <input id="mg-name" type="text" class="form-control" placeholder="Nama group baru (mis: uplink)" style="min-width:220px;">
+      <button id="mg-save" class="btn btn-primary btn-sm">SIMPAN GROUP</button>
+      <button id="mg-del" class="btn btn-outline-danger btn-sm">HAPUS GROUP</button>
+      <small id="mg-hint" class="ms-2" style="opacity:.6;">* Simpan dari daftar interface yang sudah kamu “Tambah”.</small>
+    </div>
+  </div>
+</div>
+
+<!-- mk-group-script-v2 -->
+<style>
+  #mk-group-wrap .form-select,#mk-group-wrap .form-control,#mk-group-wrap .btn{height:34px}
+  .mk-traffic-card{transition:box-shadow .2s}
+  .mk-traffic-card.active{box-shadow:0 0 .9rem rgba(130,180,255,.30)}
+</style>
+<script>(function(){
+const getId=()=>{try{return {{ $mikrotik->id ?? 0 }}}catch(e){return 0}};
+const key=()=>`mk_groups_${getId()}`;
+async function apiAvailable(){try{const r=await fetch(`/mikrotik/${getId()}/monitor/group`,{method:'GET'});return r.ok}catch(e){return false}}
+async function loadGroups(){const sel=document.getElementById('mk-group-select'); if(!sel) return; sel.innerHTML='<option value="">— pilih group —</option>';
+ try{ if(await apiAvailable()){ const r=await fetch(`/mikrotik/${getId()}/monitor/group`); const j=await r.json(); const g=j&&j.groups?j.groups:{}; Object.keys(g).sort().forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=`${n} (${g[n].length})`; sel.appendChild(o) })}
+ else{ const j=JSON.parse(localStorage.getItem(key())||'{}'); const g=j&&j.groups?j.groups:{}; Object.keys(g).sort().forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=`${n} (${g[n].length})`; sel.appendChild(o) }) } }catch(e){} }
+function currentIfaces(){ const chips=document.querySelectorAll('[data-iface]'); if(chips.length) return Array.from(chips).map(e=>e.getAttribute('data-iface')).filter(Boolean);
+ const s=document.querySelector('select[name="iface"],#ifaceSelect,.iface-select,.form-select'); if(s&&s.value) return [s.value]; return [] }
+function toast(m,ok=true){ if(window.toastr){ ok?toastr.success(m):toastr.error(m) } else { console.log(m) } }
+async function saveGroup(){ const name=document.getElementById('mk-group-name').value.trim(); const ifs=currentIfaces(); if(!name){toast('Isi nama group',false);return} if(!ifs.length){toast('Pilih/tambah minimal 1 interface',false);return}
+ if(await apiAvailable()){ const ok=await fetch(`/mikrotik/${getId()}/monitor/group/save`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name=csrf-token]')?.content||''},body:JSON.stringify({name,ifaces:ifs})}); ok.ok?toast('Group tersimpan'):toast('Gagal simpan',false) }
+ else{ const j=JSON.parse(localStorage.getItem(key())||'{}'); j.groups=j.groups||{}; j.groups[name]=ifs; localStorage.setItem(key(),JSON.stringify(j)); toast('Group tersimpan (local)') }
+ loadGroups() }
+async function deleteGroup(){ const sel=document.getElementById('mk-group-select'); const v=sel?.value||''; if(!v){toast('Pilih group dulu',false);return}
+ if(await apiAvailable()){ const ok=await fetch(`/mikrotik/${getId()}/monitor/group/delete`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-TOKEN':document.querySelector('meta[name=csrf-token]')?.content||''},body:JSON.stringify({name:v})}); ok.ok?toast('Group dihapus'):toast('Gagal hapus',false) }
+ else{ const j=JSON.parse(localStorage.getItem(key())||'{}'); if(j.groups){ delete j.groups[v]; localStorage.setItem(key(),JSON.stringify(j)) } toast('Group dihapus (local)') }
+ loadGroups() }
+async function startGroup(){ const sel=document.getElementById('mk-group-select'); const g=sel?.value||''; if(!g){toast('Pilih group dulu',false);return}
+ let list=[]; if(await apiAvailable()){ const r=await fetch(`/mikrotik/${getId()}/monitor/group`); const j=await r.json(); const all=j&&j.groups?j.groups:{}; list=all[g]||[] }
+ else{ const j=JSON.parse(localStorage.getItem(key())||'{}'); list=(j.groups&&j.groups[g])?j.groups[g]:[] }
+ if(!list.length){toast('Group kosong',false);return}
+ const addBtn=document.querySelector('button#btnAdd,button.add-iface,button:contains("Tambah")'); const selMain=document.querySelector('select[name="iface"],#ifaceSelect,.iface-select,.form-select');
+ if(addBtn&&selMain){ for(const s of list){ selMain.value=s; addBtn.click() } }
+ const startBtn=document.querySelector('button#btnStart,button.start-mon,button:contains("Mulai")'); startBtn?.click(); }
+document.addEventListener('DOMContentLoaded',()=>{
+ document.getElementById('mk-group-save')?.addEventListener('click',saveGroup);
+ document.getElementById('mk-group-start')?.addEventListener('click',startGroup);
+ document.getElementById('mk-group-edit')?.addEventListener('click',()=>{ const sel=document.getElementById('mk-group-select'); const nm=sel?.value||''; const box=document.getElementById('mk-group-name'); if(nm&&box){ if(box.value.trim()===nm){ deleteGroup() } else { box.value=nm; box.focus() } }});
+ loadGroups();
+});
+})();</script>

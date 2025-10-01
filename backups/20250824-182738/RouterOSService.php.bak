@@ -1,0 +1,181 @@
+<?php
+namespace App\Services;
+
+use App\Models\Mikrotik;
+use RouterOS\Client;
+use RouterOS\Query;
+use Illuminate\Support\Facades\Log;
+
+class RouterOSService
+{
+    /** @var \RouterOS\Client */
+    protected $client;
+
+    public function __construct(Mikrotik $mikrotik)
+    {
+        $cfg = [
+            'host'    => $mikrotik->host,
+            'port'    => $mikrotik->port ?: 8728,
+            'user'    => $mikrotik->username,
+            'pass'    => $mikrotik->password,
+            'timeout' => 10,
+        ];
+        Log::info('ROS connect SVC', [
+            'host'=>$cfg['host'],'port'=>$cfg['port'],
+            'user'=>$cfg['user'],'pwd_len'=>strlen($cfg['pass'])
+        ]);
+        $this->client = new Client($cfg);
+    }
+
+    /** Helper: query with equals() params, with error log */
+    protected function safeQuery(string $path, array $params = [])
+    {
+        try {
+            $q = new Query($path);
+            foreach ($params as $k => $v) {
+                $q->equal($k, $v);
+            }
+            return $this->client->query($q)->read();
+        } catch (\Throwable $e) {
+            Log::error('ROS_ERR', ['path'=>$path, 'err'=>$e->getMessage()]);
+            throw $e;
+        }
+    }
+
+    /** Helper: /print with support for ?key filters */
+    protected function printQuery(string $base, array $where = [])
+    {
+        $q = new Query(rtrim($base, '/').'/print');
+        foreach ($where as $k => $v) {
+            if (strlen($k) && $k[0] === '?') $q->where(substr($k,1), $v);
+            else $q->equal($k, $v);
+        }
+        return $this->client->query($q)->read();
+    }
+
+    /** Find .id by filters on /print */
+    protected function findId(string $base, array $where)
+    {
+        $rows = $this->printQuery($base, $where);
+        if (!empty($rows)) {
+            foreach ($rows as $r) {
+                if (isset($r['.id'])) return $r['.id'];
+            }
+        }
+        return null;
+    }
+
+    /* --------- Interfaces & monitor ---------- */
+    public function interfaces(): array
+    {
+        $rows = $this->safeQuery('/interface/print');
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'name' => $r['name'] ?? '',
+                'type' => $r['type'] ?? '',
+            ];
+        }
+        return $out;
+    }
+
+    public function monitorInterface(string $iface): array
+    {
+        $q = new Query('/interface/monitor-traffic');
+        $q->equal('interface', $iface)->equal('once', 'yes');
+        $res = $this->client->query($q)->read();
+        $rx = 0; $tx = 0;
+        if (!empty($res[0])) {
+            $rx = (int)($res[0]['rx-bits-per-second'] ?? 0);
+            $tx = (int)($res[0]['tx-bits-per-second'] ?? 0);
+        }
+        return ['rx'=>$rx, 'tx'=>$tx];
+    }
+
+    /* --------- VLAN & Bridge ---------- */
+    public function addVlan(string $name, string $interface, int $vid): void
+    {
+        $this->safeQuery('/interface/vlan/add', [
+            'name'=>$name, 'interface'=>$interface, 'vlan-id'=>(string)$vid
+        ]);
+    }
+    public function addBridge(string $bridge): void
+    {
+        $this->safeQuery('/interface/bridge/add', ['name'=>$bridge]);
+    }
+    public function addBridgePort(string $bridge, string $iface): void
+    {
+        $this->safeQuery('/interface/bridge/port/add', [
+            'bridge'=>$bridge, 'interface'=>$iface
+        ]);
+    }
+
+    /* --------- PPPoE (secrets & active) ---------- */
+    public function pppSecrets(): array
+    {
+        return $this->safeQuery('/ppp/secret/print');
+    }
+    public function pppActive(): array
+    {
+        return $this->safeQuery('/ppp/active/print');
+    }
+    public function pppAdd(string $name, string $password, string $profile = 'default'): void
+    {
+        Log::info('[ROS_CMD] ppp.add', ['name'=>$name, 'profile'=>$profile]);
+        $this->safeQuery('/ppp/secret/add', [
+            'name'=>$name, 'password'=>$password, 'service'=>'pppoe', 'profile'=>$profile
+        ]);
+    }
+    public function pppSet(string $name, array $opts): void
+    {
+        $id = $this->findId('/ppp/secret', ['?name'=>$name]);
+        if (!$id) throw new \RuntimeException('secret not found: '.$name);
+        $params = ['.id'=>$id];
+        foreach ($opts as $k=>$v) if ($v !== null) $params[$k] = $v;
+        $this->safeQuery('/ppp/secret/set', $params);
+    }
+    public function pppRemove(string $name): void
+    {
+        $id = $this->findId('/ppp/secret', ['?name'=>$name]);
+        if ($id) $this->safeQuery('/ppp/secret/remove', ['.id'=>$id]);
+    }
+
+    /* --------- Firewall address-list (legacy) ---------- */
+    public function addToAddressList(string $list, string $ip, string $comment = ''): void
+    {
+        $this->safeQuery('/ip/firewall/address-list/add', [
+            'list'=>$list, 'address'=>$ip, 'comment'=>$comment
+        ]);
+    }
+    public function removeFromAddressList(string $list, string $ip): void
+    {
+        $id = $this->findId('/ip/firewall/address-list', ['?list'=>$list, '?address'=>$ip]);
+        if ($id) $this->safeQuery('/ip/firewall/address-list/remove', ['.id'=>$id]);
+    }
+
+    /* --------- IP /ip/address (v6) ---------- */
+    public function ipAddressAdd(string $address, string $interface, string $comment = ''): void
+    {
+        if (strpos($address, '/') === false) $address .= '/32';
+        $params = ['address'=>$address, 'interface'=>$interface];
+        if ($comment !== '') $params['comment'] = $comment;
+        Log::info('[ROS_CMD] ip.address.add', $params);
+        $this->safeQuery('/ip/address/add', $params);
+    }
+
+    public function ipAddressRemove(string $address): void
+    {
+        $id = $this->findId('/ip/address', ['address'=>$address]);
+        if (!$id && strpos($address, '/') === false) {
+            $rows = $this->safeQuery('/ip/address/print');
+            foreach ($rows as $r) {
+                $addr = $r['address'] ?? '';
+                if ($addr !== '' && strpos($addr, $address . '/') === 0 && isset($r['.id'])) {
+                    $id = $r['.id'];
+                    break;
+                }
+            }
+        }
+        if ($id) $this->safeQuery('/ip/address/remove', ['.id'=>$id]);
+    }
+}

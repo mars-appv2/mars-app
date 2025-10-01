@@ -1,0 +1,36 @@
+@extends('layouts.app')
+@section('title','Mikrotik')
+@section('content')
+@if(session('ok'))<div class="text-green-300 mb-3">{{ session('ok') }}</div>@endif
+<div class="grid md:grid-cols-2 gap-4">
+  <div class="card p-4">
+    <div class="label mb-2">Tambah Device</div>
+    <form method="POST" action="{{ route('mikrotik.store') }}" class="grid grid-cols-2 gap-2">@csrf
+      <input name="name" class="field" placeholder="Nama">
+      <input name="host" class="field" placeholder="Host/IP">
+      <input name="port" class="field" value="8728">
+      <input name="username" class="field" placeholder="username">
+      <input name="password" class="field" placeholder="password">
+      <button class="btn-primary px-4 py-2 rounded-lg col-span-2">Simpan</button>
+    </form>
+  </div>
+  <div class="card p-4">
+    <div class="label mb-2">Daftar</div>
+    <table class="w-full text-sm">
+      <thead><tr class="text-left text-[var(--muted)]"><th>Nama</th><th>Host</th><th>Aksi</th></tr></thead>
+      <tbody>
+      @foreach($list as $m)
+        <tr class="border-t border-[var(--line)]">
+          <td class="p-2">{{ $m->name }}</td>
+          <td>{{ $m->host }}:{{ $m->port }}</td>
+          <td class="space-x-2">
+            <a class="underline" href="{{ route('mikrotik.dashboard',$m) }}">Dashboard</a>
+            <form method="POST" action="{{ route('mikrotik.delete',$m) }}" class="inline">@csrf <button class="text-red-300">Hapus</button></form>
+          </td>
+        </tr>
+      @endforeach
+      </tbody>
+    </table>
+  </div>
+</div>
+@endsection

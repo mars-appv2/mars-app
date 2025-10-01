@@ -1,0 +1,12 @@
+<?php
+
+// use Illuminate\Support\Facades\Route;
+// use App\Http\Controllers\Api\RadiusClientController;
+// use App\Http\Controllers\WaBotController;
+use App\Http\Controllers\WaWebhookController;
+
+// Tetap: endpoint data Radius dengan middleware kunci
+// Route::middleware('radius.key')->get('/radius/clients', [RadiusClientController::class, 'index']);
+
+// === WA WEBHOOK ===
+Route::post('/wa/webhook', [WaWebhookController::class, 'handle'])->name('wa.webhook');

@@ -1,0 +1,29 @@
+@extends('layouts.app')
+@section('title','Mikrotik – IP Static (Address-List)')
+@section('content')
+@if(session('ok')) <div class="mb-3 text-green-300">{{ session('ok') }}</div> @endif
+<div class="card p-4">
+  <div class="label mb-2">Tambah ke Address-List</div>
+  <form method="POST" action="{{ route('mikrotik.ipstatic.add',$mikrotik) }}" class="grid md:grid-cols-4 gap-2">@csrf
+    <input name="ip" class="field" placeholder="1.2.3.4/32">
+    <input name="list" class="field" value="static">
+    <input name="comment" class="field" placeholder="Comment (opsional)">
+    <button class="btn-primary px-4 py-2 rounded-lg">Tambah</button>
+  </form>
+  <div class="label mt-6 mb-2">Hapus dari Address-List</div>
+  <form method="POST" action="{{ route('mikrotik.ipstatic.remove',$mikrotik) }}" class="grid md:grid-cols-3 gap-2">@csrf
+    <input name="ip" class="field" placeholder="1.2.3.4/32">
+    <input name="list" class="field" value="static">
+    <button class="btn-primary px-4 py-2 rounded-lg">Hapus</button>
+  </form>
+
+  <div class="label mt-6 mb-2">Record Traffic untuk IP</div>
+  <form method="POST" action="{{ route('mikrotik.ipstatic.record',$mikrotik) }}" class="grid md:grid-cols-3 gap-2">@csrf
+    <input name="ip" class="field" placeholder="1.2.3.4/32">
+    <label class="inline-flex items-center gap-2"><input type="checkbox" name="enable" checked> <span>Enable</span></label>
+    <button class="btn-primary px-4 py-2 rounded-lg">Simpan</button>
+  </form>
+
+  <p class="text-sm opacity-80 mt-4">Recorder akan membuat Simple Queue <code>mon-&lt;ip&gt;</code> dan menyimpan rate per menit.</p>
+</div>
+@endsection

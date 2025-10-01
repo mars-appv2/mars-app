@@ -1,0 +1,90 @@
+@extends('layouts.app')
+
+@section('content')
+<div class="space-y-6">
+  <h2 class="text-xl font-semibold">Mikrotik – Dashboard</h2>
+
+  @if(!empty($err))
+    <div class="card" style="border-color:#ef4444;color:#ef9a9a">{{ $err }}</div>
+  @endif
+
+  <div class="card">
+    <label class="lbl">Interface</label>
+    <div class="flex gap-3 items-center">
+      <select id="iface" class="inp w-64">
+        @foreach(($if ?? []) as $i)
+          @php $n=$i['name']??''; $t=$i['type']??''; @endphp
+          @if($n!=='') <option value="{{ $n }}">{{ $n }} ({{ $t }})</option> @endif
+        @endforeach
+      </select>
+      <button class="btn" id="btnSee">LIHAT</button>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6 mt-6">
+      <div>
+        <div class="lbl">RX</div>
+        <div id="rxNum" class="text-2xl font-bold">0 bps</div>
+        <progress id="rxBar" value="0" max="100000000"></progress>
+      </div>
+      <div>
+        <div class="lbl">TX</div>
+        <div id="txNum" class="text-2xl font-bold">0 bps</div>
+        <progress id="txBar" value="0" max="100000000"></progress>
+      </div>
+    </div>
+    <div class="muted mt-2">Polling tiap 2 detik setelah klik LIHAT.</div>
+  </div>
+</div>
+
+<style>
+  .card{background:#0f1428;border:1px solid #1e2a4a;border-radius:14px;padding:16px}
+  .btn{background:#4da3ff;color:#001a33;padding:.5rem .9rem;border-radius:.6rem;border:0;font-weight:600}
+  .inp{background:#0b1020;border:1px solid #243154;border-radius:.6rem;color:#e8eefc;padding:.55rem .6rem}
+  progress{width:100%;height:10px;background:#0b1020}
+  .lbl{display:block;color:#9fb3d9;font-size:.9rem;margin:.3rem 0}
+  .muted{color:#9fb3d9}
+</style>
+
+<script>
+(function(){
+  const btn = document.getElementById('btnSee');
+  const sel = document.getElementById('iface');
+  const rxNum = document.getElementById('rxNum');
+  const txNum = document.getElementById('txNum');
+  const rxBar = document.getElementById('rxBar');
+  const txBar = document.getElementById('txBar');
+
+  let timer = null;
+
+  function fmt(n){
+    const u=['bps','Kbps','Mbps','Gbps']; let i=0; let x=n;
+    while(x>=1000 && i<u.length-1){ x/=1000; i++; }
+    return x.toFixed(2)+' '+u[i];
+  }
+
+  btn.addEventListener('click', ()=>{
+    if(timer){ clearInterval(timer); timer=null; }
+    const iface = sel.value;
+    if(!iface) return;
+    const url = "{{ route('mikrotik.monitor',['mikrotik'=>$mikrotik->id]) }}";
+    async function tick(){
+      try{
+        const resp = await fetch(url, {
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'},
+          body: JSON.stringify({iface})
+        });
+        if(!resp.ok) return;
+        const data = await resp.json();
+        const rx = Number(data.rx||0), tx = Number(data.tx||0);
+        rxNum.textContent = fmt(rx);
+        txNum.textContent = fmt(tx);
+        rxBar.value = rx; txBar.value = tx;
+      }catch(e){}
+    }
+    tick();
+    timer = setInterval(tick, 2000);
+  });
+})();
+</script>
+@endsection

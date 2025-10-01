@@ -1,0 +1,213 @@
+<?php
+namespace App\Services;
+
+use App\Models\Mikrotik;
+use RouterOS\Client;
+use Throwable;
+
+class RouterOSService
+{
+    /** @var Mikrotik|null */
+    protected $mt;
+    /** @var Client|null */
+    protected $client;
+
+    public function __construct(Mikrotik $mt = null)
+    {
+        if ($mt) {
+            $this->connectFromModel($mt);
+        }
+    }
+
+    public function connectFromModel(Mikrotik $mt): void
+    {
+        $this->mt = $mt;
+        $host = $mt->host;
+        $user = $mt->username;
+        $pass = $mt->password;
+        $port = $mt->port ?: 8728;
+
+        $this->client = new Client([
+            'host'     => $host,
+            'user'     => $user,
+            'pass'     => $pass,
+            'port'     => (int)$port,
+            'timeout'  => 8,
+            'attempts' => 1,
+        ]);
+    }
+
+    protected function cli(): Client
+    {
+        if (!$this->client) {
+            throw new \RuntimeException('RouterOS client not initialized');
+        }
+        return $this->client;
+    }
+
+    /**
+     * Wrapper aman: log perintah, tangkap error, dan selalu kembalikan array.
+     */
+    public function safeQuery(string $path, array $params = []): array
+    {
+        try {
+            \Log::info('[ROS_CMD] '.$path, $params);
+            $res = $this->cli()->query($path, $params)->read();
+            $cnt = is_array($res) ? count($res) : 0;
+            \Log::info('[ROS_CMD].ok '.$path, ['count' => $cnt]);
+            return is_array($res) ? $res : [];
+        } catch (Throwable $e) {
+            \Log::error('[ROS_ERR] '.$path.' '.$e->getMessage(), [
+                'params' => $params,
+            ]);
+            throw $e;
+        }
+    }
+
+    /** ================= Interface ================= */
+
+    public function interfaces(): array
+    {
+        return $this->safeQuery('/interface/print');
+    }
+
+    public function monitorInterface(string $iface): array
+    {
+        // ROS v6: /interface/monitor-traffic once
+        $rows = $this->safeQuery('/interface/monitor-traffic', [
+            'interface' => $iface,
+            'once'      => true,
+        ]);
+        $row = is_array($rows) && !empty($rows) ? $rows[0] : [];
+        $rx  = (int)($row['rx-bits-per-second'] ?? $row['rx-bps'] ?? 0);
+        $tx  = (int)($row['tx-bits-per-second'] ?? $row['tx-bps'] ?? 0);
+        return ['rx' => $rx, 'tx' => $tx];
+    }
+
+    public function addVlan(string $name, string $interface, int $vid): void
+    {
+        $this->safeQuery('/interface/vlan/add', [
+            'name'      => $name,
+            'interface' => $interface,
+            'vlan-id'   => $vid,
+        ]);
+    }
+
+    public function addBridge(string $name): void
+    {
+        $this->safeQuery('/interface/bridge/add', ['name' => $name]);
+    }
+
+    public function addBridgePort(string $bridge, string $iface): void
+    {
+        $this->safeQuery('/interface/bridge/port/add', [
+            'bridge'   => $bridge,
+            'interface'=> $iface,
+        ]);
+    }
+
+    /** ================ PPPoE ================= */
+
+    public function pppSecrets(): array
+    {
+        return $this->safeQuery('/ppp/secret/print');
+    }
+
+    public function pppActive(): array
+    {
+        return $this->safeQuery('/ppp/active/print');
+    }
+
+    protected function findId(string $pathBase, array $where): ?string
+    {
+        // cara 1: pakai filter "?field"
+        $params = [];
+        foreach ($where as $k => $v) {
+            $params['?'.$k] = $v;
+        }
+        $rows = $this->safeQuery($pathBase.'/print', $params);
+        if (!empty($rows) && isset($rows[0]['.id'])) {
+            return $rows[0]['.id'];
+        }
+        // cara 2: tanpa '?'
+        $rows2 = $this->safeQuery($pathBase.'/print', $where);
+        if (!empty($rows2) && isset($rows2[0]['.id'])) {
+            return $rows2[0]['.id'];
+        }
+        return null;
+    }
+
+    public function pppAdd(string $name, string $password, string $profile = 'default'): void
+    {
+        $this->safeQuery('/ppp/secret/add', [
+            'name'     => $name,
+            'password' => $password,
+            'profile'  => $profile,
+        ]);
+    }
+
+    /**
+     * $fields contoh: ['password'=>'xxx','profile'=>'Silver','disabled'=>'yes|no']
+     */
+    public function pppSet(string $name, array $fields): void
+    {
+        $id = $this->findId('/ppp/secret', ['name' => $name]);
+        if (!$id) {
+            throw new \RuntimeException('PPPoE secret not found: '.$name);
+        }
+        $payload = array_filter($fields, function ($v) {
+            return $v !== null && $v !== '';
+        });
+        $payload['.id'] = $id;
+        $this->safeQuery('/ppp/secret/set', $payload);
+    }
+
+    public function pppRemove(string $name): void
+    {
+        $id = $this->findId('/ppp/secret', ['name' => $name]);
+        if ($id) {
+            $this->safeQuery('/ppp/secret/remove', ['.id' => $id]);
+        }
+    }
+
+    /** ============== Address-list (untuk fitur rekam/opsional) ============== */
+
+    public function addToAddressList(string $list, string $ip, string $comment = ''): void
+    {
+        $this->safeQuery('/ip/firewall/address-list/add', [
+            'list'    => $list,
+            'address' => $ip,
+            'comment' => $comment,
+        ]);
+    }
+
+    public function removeFromAddressList(string $list, string $ip): void
+    {
+        $id = $this->findId('/ip/firewall/address-list', [
+            'list'    => $list,
+            'address' => $ip,
+        ]);
+        if ($id) {
+            $this->safeQuery('/ip/firewall/address-list/remove', ['.id' => $id]);
+        }
+    }
+
+    /** ============== IP Address (dipakai IP Static) ============== */
+
+    public function ipAddressAdd(string $address, string $interface, string $comment = ''): void
+    {
+        $this->safeQuery('/ip/address/add', [
+            'address'   => $address,
+            'interface' => $interface,
+            'comment'   => $comment,
+        ]);
+    }
+
+    public function ipAddressRemove(string $address): void
+    {
+        $id = $this->findId('/ip/address', ['address' => $address]);
+        if ($id) {
+            $this->safeQuery('/ip/address/remove', ['.id' => $id]);
+        }
+    }
+}

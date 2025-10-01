@@ -1,0 +1,100 @@
+<?php
+namespace App\Services;
+
+use App\Models\Mikrotik;
+use RouterOS\Client;
+
+class RouterOSService
+{
+    protected Mikrotik $dev;
+    protected Client $client;
+
+    public function __construct(Mikrotik $mikrotik)
+    {
+        $this->dev = $mikrotik;
+        $this->client = $this->makeClient($mikrotik);
+    }
+
+    protected function makeClient(Mikrotik $m): Client
+    {
+        $cfg = [
+            'host'=>$m->host,'user'=>$m->username,'pass'=>$m->password,
+            'port'=>$m->port ?: 8728,'timeout'=>5,'attempts'=>1,
+        ];
+        if (class_exists('\Log')) \Log::info('ROS connect SVC', ['host'=>$cfg['host'],'port'=>$cfg['port'],'user'=>$cfg['user'],'pwd_len'=>strlen((string)$cfg['pass'])]);
+        try { return new Client($cfg); }
+        catch (\Throwable $e) { throw new \RuntimeException($this->friendly($e), 0, $e); }
+    }
+
+    protected function friendly(\Throwable $e): string {
+        $m=$e->getMessage();
+        if (stripos($m,'user name or password')!==false || stripos($m,'login failed')!==false) return 'Invalid username or password supplied.';
+        if (stripos($m,'syntax error')!==false) return 'Syntax error (cek PHP 7.4 / named-args).';
+        if (stripos($m,'Undefined offset')!==false) return 'RouterOS response empty (Undefined offset).';
+        return $m ?: 'RouterOS error';
+    }
+
+    /** Query wrapper aman (gak indexing langsung) */
+    protected function safeQuery(string $path, array $args = []): array {
+        try { return $this->client->query($path, $args)->read(); }
+        catch (\Throwable $e){ throw new \RuntimeException($this->friendly($e), 0, $e); }
+    }
+
+    /** cari .id aman (no undefined offset kalau kosong) */
+    protected function findId(string $path,array $where): ?string {
+        $res = $this->safeQuery($path.'/print', $where);
+        return $res[0]['.id'] ?? null;
+    }
+
+    /* ===== Interfaces ===== */
+    public function interfaces(): array { return $this->safeQuery('/interface/print'); }
+
+    public function monitorInterface(string $name): array {
+        $r = $this->safeQuery('/interface/monitor-traffic', ['interface'=>$name,'once'=>'true']);
+        $row = is_array($r) && isset($r[0]) ? $r[0] : [];
+        $rx=(int)($row['rx-bits-per-second'] ?? $row['rx-bps'] ?? $row['rx'] ?? 0);
+        $tx=(int)($row['tx-bits-per-second'] ?? $row['tx-bps'] ?? $row['tx'] ?? 0);
+        return ['rx'=>$rx,'tx'=>$tx];
+    }
+
+    public function addVlan(string $name,string $iface,int $vid): void {
+        $this->safeQuery('/interface/vlan/add',['name'=>$name,'interface'=>$iface,'vlan-id'=>$vid]);
+    }
+    public function addBridge(string $bridge): void {
+        try { $this->safeQuery('/interface/bridge/add',['name'=>$bridge]); }
+        catch (\RuntimeException $e){ if (stripos($e->getMessage(),'already')===false) throw $e; }
+    }
+    public function addBridgePort(string $bridge,string $iface): void {
+        $this->safeQuery('/interface/bridge/port/add',['bridge'=>$bridge,'interface'=>$iface]);
+    }
+
+    /* ===== PPP ===== */
+    public function pppSecrets(): array { return $this->safeQuery('/ppp/secret/print'); }
+    public function pppActive(): array { return $this->safeQuery('/ppp/active/print'); }
+
+    public function pppAdd(string $name,string $password,string $profile='default'): void {
+        $this->safeQuery('/ppp/secret/add',['name'=>$name,'password'=>$password,'profile'=>$profile]);
+        if (class_exists('\Log')) \Log::info('ROS pppAdd ok', ['name'=>$name,'profile'=>$profile]);
+    }
+    public function pppSet(string $name,array $attrs): void {
+        $id=$this->findId('/ppp/secret',['?name'=>$name]);
+        if(!$id) throw new \RuntimeException('Secret not found: '.$name);
+        $this->safeQuery('/ppp/secret/set',array_merge(['.id'=>$id],$attrs));
+    }
+    public function pppRemove(string $name): void {
+        $id=$this->findId('/ppp/secret',['?name'=>$name]);
+        if($id) $this->safeQuery('/ppp/secret/remove',['.id'=>$id]);
+    }
+
+    public function pppProfiles(): array { return $this->safeQuery('/ppp/profile/print'); }
+
+    public function pppProfileAdd(string $name,string $rateLimit,?string $parentQueue=null): void {
+        $attrs=['name'=>$name,'rate-limit'=>$rateLimit,'use-queue'=>'default'];
+        if ($parentQueue) {
+            $script=':local u $user; :do { /queue simple set [find name=$u] parent="'.addslashes($parentQueue).'" } on-error={} ;';
+            $attrs['on-up']=$script;
+        }
+        $this->safeQuery('/ppp/profile/add',$attrs);
+        if (class_exists('\Log')) \Log::info('ROS pppProfileAdd ok', ['name'=>$name,'rate'=>$rateLimit,'parent'=>$parentQueue]);
+    }
+}
